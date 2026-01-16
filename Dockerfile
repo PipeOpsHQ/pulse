@@ -21,8 +21,11 @@ COPY --from=frontend-builder /app/frontend/public ./frontend/public
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o pulse .
 
 # Stage 3: Final minimal image
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libc6 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /root/
 # Copy binary from builder
 COPY --from=backend-builder /app/pulse .
