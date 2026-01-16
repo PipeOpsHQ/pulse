@@ -6,13 +6,13 @@
     switch (type) {
       case 'success': return '✓';
       case 'error': return '✕';
-      case 'warning': return '⚠';
+      case 'warning': return '!';
       case 'info': return 'ℹ';
-      case 'unauthorized': return '🔒';
-      case 'forbidden': return '🚫';
-      case 'notfound': return '🔍';
-      case 'ratelimited': return '⏱';
-      case 'servererror': return '💥';
+      case 'unauthorized': return 'LOCK';
+      case 'forbidden': return 'X';
+      case 'notfound': return '?';
+      case 'ratelimited': return '!';
+      case 'servererror': return 'X';
       default: return 'i';
     }
   }

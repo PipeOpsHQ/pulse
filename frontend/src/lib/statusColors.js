@@ -11,7 +11,7 @@ export function getHttpStatusColor(statusCode) {
       text: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
       border: 'border-emerald-500/20',
-      icon: '✅',
+      icon: 'OK',
       label: 'Success'
     };
   } else if (statusCode >= 300 && statusCode < 400) {
@@ -19,7 +19,7 @@ export function getHttpStatusColor(statusCode) {
       text: 'text-cyan-400',
       bg: 'bg-cyan-500/10',
       border: 'border-cyan-500/20',
-      icon: '↪️',
+      icon: '->',
       label: 'Redirect'
     };
   } else if (statusCode >= 400 && statusCode < 500) {
@@ -28,7 +28,7 @@ export function getHttpStatusColor(statusCode) {
         text: 'text-red-400',
         bg: 'bg-red-500/10',
         border: 'border-red-500/20',
-        icon: '🔒',
+        icon: 'LOCK',
         label: 'Unauthorized'
       };
     } else if (statusCode === 403) {
@@ -36,7 +36,7 @@ export function getHttpStatusColor(statusCode) {
         text: 'text-red-400',
         bg: 'bg-red-500/10',
         border: 'border-red-500/20',
-        icon: '🚫',
+        icon: 'X',
         label: 'Forbidden'
       };
     } else if (statusCode === 404) {
@@ -44,7 +44,7 @@ export function getHttpStatusColor(statusCode) {
         text: 'text-yellow-400',
         bg: 'bg-yellow-500/10',
         border: 'border-yellow-500/20',
-        icon: '🔍',
+        icon: '?',
         label: 'Not Found'
       };
     } else if (statusCode === 429) {
@@ -52,7 +52,7 @@ export function getHttpStatusColor(statusCode) {
         text: 'text-orange-400',
         bg: 'bg-orange-500/10',
         border: 'border-orange-500/20',
-        icon: '⚠️',
+        icon: '!',
         label: 'Rate Limited'
       };
     } else {
@@ -60,7 +60,7 @@ export function getHttpStatusColor(statusCode) {
         text: 'text-yellow-400',
         bg: 'bg-yellow-500/10',
         border: 'border-yellow-500/20',
-        icon: '⚠️',
+        icon: '!',
         label: 'Client Error'
       };
     }
@@ -69,7 +69,7 @@ export function getHttpStatusColor(statusCode) {
       text: 'text-red-400',
       bg: 'bg-red-500/10',
       border: 'border-red-500/20',
-      icon: '💥',
+      icon: 'X',
       label: 'Server Error'
     };
   } else {
@@ -77,7 +77,7 @@ export function getHttpStatusColor(statusCode) {
       text: 'text-purple-400',
       bg: 'bg-purple-500/10',
       border: 'border-purple-500/20',
-      icon: '❓',
+      icon: '?',
       label: 'Unknown'
     };
   }

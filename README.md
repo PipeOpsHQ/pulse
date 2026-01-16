@@ -1,4 +1,4 @@
-# Pulse 🛸
+# Pulse
 
 ### Minimalist, High-Performance Error Tracking for Modern Dev Teams.
 
@@ -9,7 +9,7 @@ Pulse is an open-source, self-hosted error monitoring solution designed for deve
 
 ---
 
-## ✨ Features
+## Features
 
 - **Blazing Fast**: Near-zero latency ingestion and a high-performance, single-binary architecture.
 - **Privacy First**: Your data stays in your infrastructure. Periodic SQLite backups are all you need.
@@ -18,7 +18,7 @@ Pulse is an open-source, self-hosted error monitoring solution designed for deve
 - **Lightweight**: Minimalist resource footprint—perfect for side projects or internal microservices.
 - **Real-time Analytics**: Instant visibility into error spikes, environment trends, and user impact.
 
-## 🚀 Quick Start (Docker)
+## Quick Start (Docker)
 
 The easiest way to deploy Pulse is using Docker Compose.
 
@@ -54,7 +54,7 @@ Navigate to `http://localhost:8080` and use your credentials.
 
 ---
 
-## 🛠 Integration
+## Integration
 
 Pulse generates a unique DSN for every project. Simply initialize your favorite Sentry-compatible SDK:
 
@@ -78,7 +78,7 @@ sentry.Init(sentry.ClientOptions{
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 Pulse is designed for operational simplicity:
 
@@ -97,20 +97,20 @@ graph TD
 
 ---
 
-## 🛡 Security
+## Security
 
 We take security seriously. Please refer to our [SECURITY.md](./SECURITY.md) for vulnerability reporting.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions of all sizes! Check out our [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
 
-## 📄 License
+## License
 
 Pulse is open-source software licensed under the [MIT License](./LICENSE).
 
 ---
 
 <p align="center">
-  Built with ❤️ for developers by the Pulse Community.
+  Built with love by PipeOps
 </p>

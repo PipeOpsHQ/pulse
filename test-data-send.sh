@@ -52,10 +52,10 @@ send_data() {
   body=$(echo "$response" | sed '$d')
 
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-    echo -e "${GREEN}  ✅ Success (${http_code})${NC}"
+    echo -e "${GREEN}  [OK] Success (${http_code})${NC}"
     return 0
   else
-    echo -e "${RED}  ❌ Failed (${http_code})${NC}"
+    echo -e "${RED}  [FAIL] Failed (${http_code})${NC}"
     if [ ${#body} -lt 200 ]; then
       echo "  Response: $body"
     fi
@@ -82,10 +82,10 @@ send_file() {
 
   # Color code based on HTTP status
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-    echo -e "${GREEN}  ✅ Success (${http_code})${NC}"
+    echo -e "${GREEN}  [OK] Success (${http_code})${NC}"
     return 0
   elif [ "$http_code" -ge 300 ] && [ "$http_code" -lt 400 ]; then
-    echo -e "${CYAN}  ↪️  Redirect (${http_code})${NC}"
+    echo -e "${CYAN}  [->] Redirect (${http_code})${NC}"
     if [ ${#body} -lt 200 ]; then
       echo -e "${CYAN}  Response: $body${NC}"
     fi
