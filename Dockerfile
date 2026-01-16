@@ -8,7 +8,7 @@ RUN npm run build
 
 # Stage 2: Build the backend
 FROM golang:1.24-alpine AS backend-builder
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base sqlite-dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -16,7 +16,8 @@ COPY . .
 # Copy static files from frontend build
 COPY --from=frontend-builder /app/frontend/public ./frontend/public
 # Build the binary with SQLite support (requires CGO)
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o pulse .
+# Use musl tag to work around Alpine/musl libc limitations with pread64/pwrite64
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -tags musl -o pulse .
 
 # Stage 3: Final minimal image
 FROM alpine:latest
