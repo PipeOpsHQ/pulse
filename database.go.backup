@@ -1,0 +1,62 @@
+// ... existing code ...
+
+// Project Settings
+
+type ProjectSettings struct {
+	ProjectID             string    `json:"project_id"`
+	NotificationEnabled   bool      `json:"notification_enabled"`
+	NotificationLevels    string    `json:"notification_levels"`    // comma-separated: error,fatal,warning,info
+	NotificationFrequency string    `json:"notification_frequency"` // immediate, hourly, daily
+	NotificationEmail     string    `json:"notification_email"`
+	NotificationWebhookURL string  `json:"notification_webhook_url"`
+	NotificationRateLimit  int      `json:"notification_rate_limit"` // minutes
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+func GetProjectSettings(db *sql.DB, projectID string) (*ProjectSettings, error) {
+	var s ProjectSettings
+	err := db.QueryRow(
+		`SELECT project_id, notification_enabled, notification_levels, notification_frequency, 
+		 notification_email, notification_webhook_url, notification_rate_limit, updated_at 
+		 FROM project_settings WHERE project_id = ?`,
+		projectID,
+	).Scan(
+		&s.ProjectID, &s.NotificationEnabled, &s.NotificationLevels, &s.NotificationFrequency,
+		&s.NotificationEmail, &s.NotificationWebhookURL, &s.NotificationRateLimit, &s.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		// Return default settings if none exist
+		return &ProjectSettings{
+			ProjectID:             projectID,
+			NotificationEnabled:  true,
+			NotificationLevels:    "error,fatal",
+			NotificationFrequency: "immediate",
+			NotificationEmail:     "",
+			NotificationWebhookURL: "",
+			NotificationRateLimit: 60,
+			UpdatedAt:             time.Now(),
+		}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func UpdateProjectSettings(db *sql.DB, s *ProjectSettings) error {
+	_, err := db.Exec(
+		`INSERT OR REPLACE INTO project_settings 
+		 (project_id, notification_enabled, notification_levels, notification_frequency, 
+		  notification_email, notification_webhook_url, notification_rate_limit, updated_at) 
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ProjectID, s.NotificationEnabled, s.NotificationLevels, s.NotificationFrequency,
+		s.NotificationEmail, s.NotificationWebhookURL, s.NotificationRateLimit, time.Now(),
+	)
+	return err
+}
+
+func UpdateProjectName(db *sql.DB, projectID, name string) error {
+	_, err := db.Exec("UPDATE projects SET name = ? WHERE id = ?", name, projectID)
+	return err
+}

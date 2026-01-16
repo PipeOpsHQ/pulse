@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  pulse:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/root/data
+    environment:
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-password}
+      - JWT_SECRET=${JWT_SECRET:-very-secret-pulse-key}
+      - PORT=8080
+    restart: always
