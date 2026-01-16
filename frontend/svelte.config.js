@@ -1,5 +1,5 @@
 export default {
   compilerOptions: {
-    css: true
+    css: 'injected'
   }
 };
