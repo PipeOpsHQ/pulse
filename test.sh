@@ -72,11 +72,11 @@ test_endpoint() {
   local body=$(echo "$response" | sed 's/[0-9]\{3\}$//')
 
   if [ "$http_code" = "$expected_status" ] || [ "$expected_status" = "any" ]; then
-    echo "    ✅ Status: $http_code"
+    echo "    [OK] Status: $http_code"
     TESTS_PASSED=$((TESTS_PASSED + 1))
     return 0
   else
-    echo "    ❌ Expected: $expected_status, Got: $http_code"
+    echo "    [FAIL] Expected: $expected_status, Got: $http_code"
     if [ -n "$body" ] && [ ${#body} -lt 200 ]; then
       echo "    Response: $(echo "$body" | head -c 150)"
     fi
@@ -121,7 +121,7 @@ get_auth_token() {
 }
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║         🔍 PULSE COMPREHENSIVE TEST SUITE                       ║"
+echo "║         PULSE COMPREHENSIVE TEST SUITE                           ║"
 echo "╠════════════════════════════════════════════════════════════════╣"
 echo "║ Base URL:  $BASE_URL"
 echo "║ Project:   $PROJECT_ID"
@@ -130,7 +130,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # Get auth token
-echo "🔐 Authenticating with $ADMIN_EMAIL..."
+echo "[AUTH] Authenticating with $ADMIN_EMAIL..."
 AUTH_TOKEN=$(get_auth_token)
 if [ -z "$AUTH_TOKEN" ]; then
   echo "⚠️  Authentication failed with $ADMIN_EMAIL"

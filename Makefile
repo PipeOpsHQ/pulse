@@ -43,10 +43,10 @@ build-all: build-frontend build
 
 # Check if server is running
 check-server:
-	@echo "🔍 Checking if server is running..."
+	@echo "[CHECK] Checking if server is running..."
 	@curl -s -f http://localhost:8080/api/health > /dev/null 2>&1 || \
-		(echo "❌ Server is not running. Start it with: make run" && exit 1)
-	@echo "✅ Server is running"
+		(echo "[FAIL] Server is not running. Start it with: make run" && exit 1)
+	@echo "[OK] Server is running"
 
 # Run end-to-end tests (requires server to be running)
 test-e2e: check-server
@@ -57,7 +57,7 @@ test-e2e: check-server
 # Run end-to-end tests with custom URL
 test-e2e-url: check-server
 	@if [ -z "$(URL)" ]; then \
-		echo "❌ Please provide URL: make test-e2e-url URL=http://localhost:8080"; \
+		echo "[FAIL] Please provide URL: make test-e2e-url URL=http://localhost:8080"; \
 		exit 1; \
 	fi
 	@echo "🧪 Running end-to-end test suite against $(URL)..."
