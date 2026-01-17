@@ -304,6 +304,60 @@
     }
   }
 
+  function buildSpanTree(spans) {
+    if (!spans || spans.length === 0) return [];
+
+    const spanMap = new Map();
+    const roots = [];
+
+    // First pass: create map
+    spans.forEach((span) => {
+      spanMap.set(span.span_id, { ...span, children: [] });
+    });
+
+    // Second pass: build tree
+    spans.forEach((span) => {
+      const node = spanMap.get(span.span_id);
+      if (
+        !span.parent_span_id ||
+        span.parent_span_id === "" ||
+        !spanMap.has(span.parent_span_id)
+      ) {
+        // If no parent or parent not in this trace, it's a root for this view
+        roots.push(node);
+      } else {
+        const parent = spanMap.get(span.parent_span_id);
+        if (parent) {
+          parent.children.push(node);
+        }
+      }
+    });
+
+    return roots;
+  }
+
+  function getStatusColor(status) {
+    const colors = {
+      ok: "text-emerald-400",
+      cancelled: "text-amber-400",
+      invalid_argument: "text-red-400",
+      deadline_exceeded: "text-red-400",
+      not_found: "text-red-400",
+      already_exists: "text-amber-400",
+      permission_denied: "text-red-400",
+      resource_exhausted: "text-red-400",
+      failed_precondition: "text-amber-400",
+      aborted: "text-amber-400",
+      out_of_range: "text-red-400",
+      unimplemented: "text-amber-400",
+      internal: "text-red-400",
+      unavailable: "text-red-400",
+      data_loss: "text-red-400",
+      unauthenticated: "text-red-400",
+    };
+    return colors[status?.toLowerCase()] || "text-slate-400";
+  }
+
   $: curlCoverageExample = project
     ? `curl -X POST "https://${window.location.host}/api/${project.id}/coverage" \\
   -H "X-Pulse-Auth: ${project.api_key}" \\
@@ -1750,6 +1804,14 @@ Sentry.init({
                   class="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-slate-300"
                   >{selectedTrace.op}</span
                 >
+                <span
+                  class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400"
+                >
+                  {(
+                    new Date(selectedTrace.timestamp).getTime() -
+                    new Date(selectedTrace.start_timestamp).getTime()
+                  ).toFixed(1)}ms
+                </span>
               </div>
             </div>
           </div>
@@ -1771,54 +1833,83 @@ Sentry.init({
             </div>
           {:else}
             <!-- Timeline Visualization -->
-            <div class="relative space-y-2">
-              {#each traceSpans as span}
+            <div class="space-y-0.5 border-l border-white/5 ml-2">
+              {#snippet renderSpan(span, level, totalDuration, traceStartTime)}
                 {@const duration =
                   new Date(span.timestamp).getTime() -
                   new Date(span.start_timestamp).getTime()}
-                {@const totalDuration =
-                  new Date(selectedTrace.timestamp).getTime() -
-                    new Date(selectedTrace.start_timestamp).getTime() || 1}
                 {@const startOffset =
-                  new Date(span.start_timestamp).getTime() -
-                  new Date(selectedTrace.start_timestamp).getTime()}
+                  new Date(span.start_timestamp).getTime() - traceStartTime}
                 {@const widthPercent = Math.max(
-                  0.5,
+                  0.2,
                   (duration / totalDuration) * 100,
                 )}
                 {@const leftPercent = (startOffset / totalDuration) * 100}
 
                 <div
-                  class="group relative flex items-center gap-4 rounded-lg p-2 hover:bg-white/5 transition-colors"
+                  class="group relative flex items-center gap-4 rounded p-1 hover:bg-white/5 transition-colors"
+                  style="margin-left: {level * 12}px"
                 >
-                  <div class="w-1/3 min-w-[200px] text-xs">
+                  <div
+                    class="w-1/3 min-w-[200px] text-[11px] flex items-center gap-2"
+                  >
                     <div
-                      class="font-bold text-slate-300 truncate"
+                      class="flex-1 truncate"
                       title={span.description || span.name}
                     >
-                      {span.description || span.name}
+                      <span class="font-bold text-slate-300"
+                        >{span.description || span.name}</span
+                      >
+                      <span class="text-[9px] text-slate-500 font-mono ml-1"
+                        >{span.op}</span
+                      >
                     </div>
-                    <div class="text-[10px] text-slate-500 font-mono mt-0.5">
-                      {span.op}
-                    </div>
+                    {#if span.status && span.status.toLowerCase() !== "ok" && span.status.toLowerCase() !== "unset"}
+                      <span
+                        class="text-[9px] uppercase font-bold {getStatusColor(
+                          span.status,
+                        )}">{span.status}</span
+                      >
+                    {/if}
                   </div>
-                  <div class="flex-1 relative h-6">
-                    <!-- Timeline Bar -->
+                  <div class="flex-1 relative h-5">
                     <div
-                      class="absolute top-1 h-4 rounded-full {span.span_id ===
+                      class="absolute top-1 h-3 rounded-sm {span.span_id ===
                       selectedTrace.span_id
                         ? 'bg-indigo-500'
-                        : 'bg-slate-600'} opacity-80 group-hover:opacity-100 transition-all border border-white/10"
+                        : 'bg-slate-600'} opacity-60 group-hover:opacity-100 transition-all border border-white/5"
                       style="left: {leftPercent}%; width: {widthPercent}%;"
                     ></div>
                     <span
-                      class="absolute top-1 text-[10px] text-slate-400 ml-2 whitespace-nowrap"
+                      class="absolute top-1 text-[9px] text-slate-500 ml-1.5 whitespace-nowrap"
                       style="left: {leftPercent + widthPercent}%;"
                     >
-                      {duration.toFixed(1)}ms
+                      {duration >= 1000
+                        ? (duration / 1000).toFixed(2) + "s"
+                        : duration.toFixed(1) + "ms"}
                     </span>
                   </div>
                 </div>
+                {#if span.children && span.children.length > 0}
+                  {#each span.children as child}
+                    {@render renderSpan(
+                      child,
+                      level + 1,
+                      totalDuration,
+                      traceStartTime,
+                    )}
+                  {/each}
+                {/if}
+              {/snippet}
+
+              {#each buildSpanTree(traceSpans) as root}
+                {@render renderSpan(
+                  root,
+                  0,
+                  new Date(selectedTrace.timestamp).getTime() -
+                    new Date(selectedTrace.start_timestamp).getTime() || 1,
+                  new Date(selectedTrace.start_timestamp).getTime(),
+                )}
               {/each}
             </div>
           {/if}

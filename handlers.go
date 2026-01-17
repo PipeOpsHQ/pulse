@@ -31,19 +31,37 @@ func (ft *FlexTimestamp) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Try string (ISO8601) next
+	// Try string next
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		t, err := time.Parse(time.RFC3339, s)
+		// Try RFC3339Nano (best for precision)
+		t, err := time.Parse(time.RFC3339Nano, s)
 		if err == nil {
 			*ft = FlexTimestamp(float64(t.UnixNano()) / 1e9)
 			return nil
 		}
-		// Try without timezone/fractional if RFC3339 fails (Sentry sometimes sends "2024-01-01T00:00:00")
-		t, err = time.Parse("2006-01-02T15:04:05", s)
+
+		// Try RFC3339 (standard)
+		t, err = time.Parse(time.RFC3339, s)
 		if err == nil {
 			*ft = FlexTimestamp(float64(t.UnixNano()) / 1e9)
 			return nil
+		}
+
+		// Try standard Sentry ISO8601 variations
+		formats := []string{
+			"2006-01-02T15:04:05.999999999",
+			"2006-01-02T15:04:05.999999",
+			"2006-01-02T15:04:05.999",
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+		}
+		for _, format := range formats {
+			t, err = time.Parse(format, s)
+			if err == nil {
+				*ft = FlexTimestamp(float64(t.UnixNano()) / 1e9)
+				return nil
+			}
 		}
 	}
 
@@ -841,8 +859,11 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			if err := InsertSpan(db, rootSpan); err != nil {
 				log.Printf("[DSN Debug] Failed to insert root span for project %s: %v", projectID, err)
 			} else {
-				log.Printf("[DSN Debug] Successfully stored root span for project %s (Trace ID: %s)", projectID, rootSpan.TraceID)
+				log.Printf("[DSN Debug] Successfully stored root span for project %s (Trace ID: %s, Span ID: %s, Op: %s)",
+					projectID, rootSpan.TraceID, rootSpan.SpanID, rootSpan.Op)
 			}
+
+			log.Printf("[DSN Debug] Processing %d child spans for trace %s", len(tx.Spans), rootSpan.TraceID)
 
 			// Process child spans
 			for _, s := range tx.Spans {
@@ -868,6 +889,9 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 				if err := InsertSpan(db, childSpan); err != nil {
 					log.Printf("[DSN Debug] Failed to insert child span for project %s: %v", projectID, err)
+				} else {
+					log.Printf("[DSN Debug] Successfully stored child span %s (parent: %s) for trace %s",
+						childSpan.SpanID, childSpan.ParentSpanID, childSpan.TraceID)
 				}
 			}
 		}

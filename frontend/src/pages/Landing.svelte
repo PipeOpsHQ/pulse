@@ -362,18 +362,30 @@
     <div
       class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row items-center justify-between gap-6"
     >
-      <div class="flex items-center gap-2 grayscale border-none opacity-40">
+      <div class="flex items-center gap-2 border-none opacity-40">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 100 100"
           class="h-6 w-6"
         >
-          <rect width="100" height="100" rx="20" fill="currentColor" />
+          <defs>
+            <linearGradient
+              id="footer-grad"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="100%"
+            >
+              <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+            </linearGradient>
+          </defs>
+          <rect width="100" height="100" rx="20" fill="url(#footer-grad)" />
           <path
             d="M20 50 L35 50 L45 20 L55 80 L65 50 L80 50"
             fill="none"
             stroke="white"
-            stroke-width="8"
+            stroke-width="12"
             stroke-linecap="round"
             stroke-linejoin="round"
           />
