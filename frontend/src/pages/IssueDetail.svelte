@@ -175,6 +175,17 @@
       ? "bg-pulse-500/10 border-pulse-500/30"
       : "bg-slate-500/5 border-slate-500/10";
   }
+
+  function getPrimaryFrame() {
+    const frames = getFrames();
+    if (!frames.length) return null;
+    // Find first in-app frame (usually the most relevant)
+    const inAppFrame = frames.find((f) => f.in_app !== false);
+    return inAppFrame || frames[0];
+  }
+
+  $: primaryFrame = getPrimaryFrame();
+  $: request = context?.request || null;
 </script>
 
 <div class="animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -209,6 +220,22 @@
             >
               {error.message || "No message"}
             </h1>
+            {#if primaryFrame}
+              <div class="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                <span class="font-bold text-pulse-400"
+                  >{primaryFrame.function || "unknown"}</span
+                >
+                <span>in</span>
+                <span class="font-mono"
+                  >{formatFilename(primaryFrame.filename)}</span
+                >
+                {#if primaryFrame.lineno}
+                  <span>at line</span>
+                  <span class="text-white font-bold">{primaryFrame.lineno}</span
+                  >
+                {/if}
+              </div>
+            {/if}
           </div>
 
           <div class="flex flex-wrap items-center gap-1.5">
@@ -261,6 +288,17 @@
           >
             <Terminal size={12} /> Details
           </button>
+          {#if request || (context && context.request)}
+            <button
+              class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider transition-all {activeTab ===
+              'request'
+                ? 'text-pulse-400'
+                : 'text-slate-500 hover:text-white'}"
+              on:click={() => (activeTab = "request")}
+            >
+              <Globe size={12} /> Request
+            </button>
+          {/if}
           <button
             class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider transition-all {activeTab ===
             'tags'
@@ -691,6 +729,91 @@
               </div>
             </div>
           {/if}
+        {:else if activeTab === "request"}
+          {@const req = request || context?.request}
+          <div class="space-y-6">
+            <div
+              class="rounded-xl border border-white/10 bg-black/40 overflow-hidden"
+            >
+              <div class="border-b border-white/10 bg-white/5 px-4 py-3">
+                <h2
+                  class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400"
+                >
+                  <Globe size={14} class="text-pulse-400" />
+                  <span>Request Body / Params</span>
+                </h2>
+              </div>
+              <div class="p-4 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                    <div
+                      class="text-[10px] text-slate-500 mb-1 uppercase tracking-wider"
+                    >
+                      Method
+                    </div>
+                    <div class="text-sm font-bold text-pulse-400">
+                      {req.method || "GET"}
+                    </div>
+                  </div>
+                  <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+                    <div
+                      class="text-[10px] text-slate-500 mb-1 uppercase tracking-wider"
+                    >
+                      URL
+                    </div>
+                    <div class="text-sm font-mono text-white break-all">
+                      {req.url || "Unknown"}
+                    </div>
+                  </div>
+                </div>
+
+                {#if req.query_string}
+                  <div>
+                    <div
+                      class="text-[10px] text-slate-500 mb-1 uppercase tracking-wider"
+                    >
+                      Query String
+                    </div>
+                    <div
+                      class="p-3 rounded-lg bg-black/60 font-mono text-xs text-white"
+                    >
+                      {req.query_string}
+                    </div>
+                  </div>
+                {/if}
+
+                {#if req.headers && Object.keys(req.headers).length > 0}
+                  <div>
+                    <div
+                      class="text-[10px] text-slate-500 mb-2 uppercase tracking-wider"
+                    >
+                      Headers
+                    </div>
+                    <div
+                      class="rounded-lg border border-white/10 bg-black/60 overflow-hidden"
+                    >
+                      <table class="w-full text-left text-xs">
+                        <tbody class="divide-y divide-white/5">
+                          {#each Object.entries(req.headers) as [key, value]}
+                            <tr>
+                              <td
+                                class="px-3 py-2 font-bold text-slate-500 border-r border-white/5 w-1/3"
+                                >{key}</td
+                              >
+                              <td
+                                class="px-3 py-2 font-mono text-slate-300 break-all"
+                                >{value}</td
+                              >
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </div>
         {:else if activeTab === "tags"}
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {#if tags && Object.keys(tags).length > 0}
@@ -829,15 +952,29 @@
           <div class="space-y-4">
             <div class="flex items-center justify-between text-xs">
               <span class="flex items-center gap-2 text-slate-500"
-                ><Globe size={12} /> Region</span
+                ><Globe size={12} /> OS</span
               >
-              <span class="text-slate-300">us-east-1</span>
+              <span class="text-slate-300"
+                >{context?.os?.name || tags?.os || "Unknown"}
+                {context?.os?.version || ""}</span
+              >
             </div>
             <div class="flex items-center justify-between text-xs">
               <span class="flex items-center gap-2 text-slate-500"
                 ><Cpu size={12} /> Runtime</span
               >
-              <span class="text-slate-300">Node.js 18.x</span>
+              <span class="text-slate-300"
+                >{context?.runtime?.name || tags?.runtime || "Unknown"}
+                {context?.runtime?.version || ""}</span
+              >
+            </div>
+            <div class="flex items-center justify-between text-xs">
+              <span class="flex items-center gap-2 text-slate-500"
+                ><Terminal size={12} /> SDK</span
+              >
+              <span class="text-slate-300 font-mono text-[10px]"
+                >{error.platform || "Unknown"}</span
+              >
             </div>
           </div>
         </div>

@@ -513,14 +513,29 @@ func DeleteProject(db *sql.DB, id string) error {
 
 // Error functions
 func InsertError(db *sql.DB, event *ErrorEvent) error {
-	_, err := db.Exec(
-		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.ProjectID, event.Message, event.Level, event.Environment,
 		event.Release, event.Platform, event.Timestamp, event.Stacktrace, event.Context,
-		event.User, event.Tags,
+		event.User, event.Tags, event.Status, event.CreatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec("UPDATE projects SET current_month_events = current_month_events + 1 WHERE id = ?", event.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func GetErrors(db *sql.DB, projectID string, limit, offset int, status string) ([]ErrorEvent, int, error) {
@@ -708,16 +723,111 @@ type TraceSpan struct {
 	Data           string    `json:"data,omitempty"`
 }
 
-func InsertSpan(db *sql.DB, s *TraceSpan) error {
-	_, err := db.Exec(`
-		INSERT INTO spans (
-			id, project_id, trace_id, span_id, parent_span_id,
-			name, op, description, start_timestamp, timestamp, status, data
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.ProjectID, s.TraceID, s.SpanID, s.ParentSpanID,
-		s.Name, s.Op, s.Description, s.StartTimestamp, s.Timestamp, s.Status, s.Data,
+func InsertSpan(db *sql.DB, span *TraceSpan) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(
+		`INSERT INTO spans (id, project_id, trace_id, span_id, parent_span_id, name, op, description, start_timestamp, timestamp, status, data)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		span.ID, span.ProjectID, span.TraceID, span.SpanID, span.ParentSpanID,
+		span.Name, span.Op, span.Description, span.StartTimestamp, span.Timestamp,
+		span.Status, span.Data,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Only count root spans (transactions) as events for quota/stats
+	if span.ParentSpanID == "" {
+		_, err = tx.Exec("UPDATE projects SET current_month_events = current_month_events + 1 WHERE id = ?", span.ProjectID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+type HourlyStat struct {
+	Hour   string `json:"hour"`
+	Errors int    `json:"errors"`
+	Traces int    `json:"traces"`
+}
+
+func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
+	// Initialize 24h of data
+	stats := make([]HourlyStat, 24)
+	now := time.Now()
+	for i := 0; i < 24; i++ {
+		t := now.Add(time.Duration(-(23 - i)) * time.Hour)
+		stats[i] = HourlyStat{
+			Hour:   t.Format("2006-01-02 15:00:00"),
+			Errors: 0,
+			Traces: 0,
+		}
+	}
+
+	// Fetch Errors
+	errorQuery := `SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as h, count(*)
+				   FROM errors
+				   WHERE timestamp > datetime('now', '-24 hours') `
+	args := []interface{}{}
+	if projectID != "" {
+		errorQuery += " AND project_id = ? "
+		args = append(args, projectID)
+	}
+	errorQuery += " GROUP BY h"
+
+	rows, err := db.Query(errorQuery, args...)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var h string
+			var count int
+			if err := rows.Scan(&h, &count); err == nil {
+				for i := range stats {
+					if stats[i].Hour == h {
+						stats[i].Errors = count
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Fetch Traces (Root Spans)
+	traceQuery := `SELECT strftime('%Y-%m-%d %H:00:00', start_timestamp) as h, count(*)
+				   FROM spans
+				   WHERE start_timestamp > datetime('now', '-24 hours') AND parent_span_id = '' `
+	args = []interface{}{}
+	if projectID != "" {
+		traceQuery += " AND project_id = ? "
+		args = append(args, projectID)
+	}
+	traceQuery += " GROUP BY h"
+
+	rows, err = db.Query(traceQuery, args...)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var h string
+			var count int
+			if err := rows.Scan(&h, &count); err == nil {
+				for i := range stats {
+					if stats[i].Hour == h {
+						stats[i].Traces = count
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return stats, nil
 }
 
 func GetProjectRootSpans(db *sql.DB, projectID string, limit int) ([]TraceSpan, error) {

@@ -59,15 +59,23 @@
     }
   });
 
+  let trends = [];
+  $: maxTrendEvents = Math.max(
+    50,
+    ...(trends || []).map((t) => (t.traces || 0) + (t.errors || 0)),
+  );
+
   async function loadData(showLoading = false) {
     if (showLoading) {
       loading = true;
     }
     try {
-      const [projectsResponse, errorsResponse] = await Promise.all([
-        api.get("/projects"),
-        api.get("/errors?limit=20"),
-      ]);
+      const [projectsResponse, errorsResponse, insightsResponse] =
+        await Promise.all([
+          api.get("/projects"),
+          api.get("/errors?limit=20"),
+          api.get("/insights?range=24h"),
+        ]);
 
       projects = Array.isArray(projectsResponse)
         ? projectsResponse
@@ -77,6 +85,7 @@
       const errorsList = Array.isArray(errorsResponse)
         ? errorsResponse
         : errorsResponse?.data || errorsResponse || [];
+
       recentErrors = Array.isArray(errorsList)
         ? errorsList.map((err) => {
             const project = (projects || []).find(
@@ -106,15 +115,28 @@
         }
       }
 
-      // Calculate summaries
+      // Use real insights data if available
+      if (insightsResponse) {
+        stats.totalEvents =
+          (insightsResponse.errors?.total_errors || 0) +
+          (insightsResponse.traces?.total_traces || 0);
+        stats.criticalErrors =
+          insightsResponse.errors?.by_level?.error ||
+          insightsResponse.errors?.by_level?.fatal ||
+          0;
+        trends = insightsResponse.trends || [];
+      } else {
+        // Fallback to manual calculation
+        stats.totalEvents = (projects || []).reduce(
+          (sum, p) => sum + (p.current_month_events || 0),
+          0,
+        );
+        stats.criticalErrors = (recentErrors || []).filter(
+          (e) => e.level === "error" || e.level === "fatal",
+        ).length;
+      }
+
       stats.activeProjects = (projects || []).length;
-      stats.totalEvents = (projects || []).reduce(
-        (sum, p) => sum + (p.current_month_events || 0),
-        0,
-      );
-      stats.criticalErrors = (recentErrors || []).filter(
-        (e) => e.level === "error",
-      ).length;
       stats.totalMonitors = monitors.length;
       stats.upMonitors = monitors.filter((m) => m.status === "up").length;
       stats.downMonitors = monitors.filter((m) => m.status === "down").length;
@@ -122,11 +144,11 @@
       // Artificial health score based on error ratio and monitor status
       if (stats.totalEvents > 0) {
         const errorRatio =
-          stats.criticalErrors / Math.max(1, recentErrors.length);
+          stats.criticalErrors / Math.max(1, stats.totalEvents);
         stats.healthScore = Math.max(
           0,
-          Math.min(100, 100 - Math.round(errorRatio * 100)),
-        );
+          Math.min(100, 100 - Math.round(errorRatio * 500)),
+        ); // Scaled for visibility
       } else {
         stats.healthScore = 100;
       }
@@ -371,55 +393,64 @@
             <div
               class="flex h-48 items-end gap-1.5 sm:gap-2 px-3 overflow-x-auto pb-8"
             >
-              {#each Array(24) as _, i}
-                {@const hour = i}
-                {@const successEvents = Math.floor(Math.random() * 50) + 20}
-                {@const errorEvents = Math.floor(Math.random() * 10) + 2}
-                {@const maxEvents = 60}
-                {@const successHeight = Math.min(
-                  100,
-                  (successEvents / maxEvents) * 100,
-                )}
-                {@const errorHeight = Math.min(
-                  100,
-                  (errorEvents / maxEvents) * 100,
-                )}
+              {#if (trends || []).length > 0}
+                {#each trends as stat}
+                  {@const successEvents = stat.traces}
+                  {@const errorEvents = stat.errors}
+                  {@const maxEvents = Math.max(
+                    50,
+                    ...trends.map((t) => t.traces + t.errors),
+                  )}
+                  {@const successHeight = (successEvents / maxEvents) * 100}
+                  {@const errorHeight = (errorEvents / maxEvents) * 100}
+                  {@const hourPart = stat.Hour.split(" ")[1].substring(0, 5)}
+
+                  <div
+                    class="group relative flex-1 min-w-[20px] flex flex-col justify-end gap-1 hover:z-10"
+                  >
+                    <div
+                      class="w-full bg-red-500/30 rounded-t-sm group-hover:bg-red-500/50 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-red-500/20"
+                      style="height: {errorHeight}%"
+                      title="{errorEvents} errors"
+                    ></div>
+                    <div
+                      class="w-full bg-emerald-500/50 rounded-t-sm group-hover:bg-emerald-500/70 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-emerald-500/20"
+                      style="height: {successHeight}%"
+                      title="{successEvents} events"
+                    ></div>
+                    <div
+                      class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-500 whitespace-nowrap"
+                    >
+                      {hourPart}
+                    </div>
+                    <!-- Tooltip on hover -->
+                    <div
+                      class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900/95 border border-white/10 rounded text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-2xl"
+                    >
+                      <div class="font-bold mb-1 border-b border-white/10 pb-1">
+                        {stat.Hour}
+                      </div>
+                      <div class="text-emerald-400">{successEvents} traces</div>
+                      <div class="text-red-400">{errorEvents} errors</div>
+                    </div>
+                  </div>
+                {/each}
+              {:else}
                 <div
-                  class="group relative flex-1 min-w-[20px] flex flex-col justify-end gap-1 hover:z-10"
+                  class="flex-1 h-full flex items-center justify-center text-slate-600 text-[10px] font-mono"
                 >
-                  <div
-                    class="w-full bg-red-500/30 rounded-t-sm group-hover:bg-red-500/50 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-red-500/20"
-                    style="height: {errorHeight}%"
-                    title="{errorEvents} errors"
-                  ></div>
-                  <div
-                    class="w-full bg-emerald-500/50 rounded-t-sm group-hover:bg-emerald-500/70 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-emerald-500/20"
-                    style="height: {successHeight}%"
-                    title="{successEvents} events"
-                  ></div>
-                  <div
-                    class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-500 whitespace-nowrap"
-                  >
-                    {String(hour).padStart(2, "0")}:00
-                  </div>
-                  <!-- Tooltip on hover -->
-                  <div
-                    class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900/95 border border-white/10 rounded text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20"
-                  >
-                    <div class="text-emerald-400">{successEvents} events</div>
-                    <div class="text-red-400">{errorEvents} errors</div>
-                  </div>
+                  No activity in the last 24 hours
                 </div>
-              {/each}
+              {/if}
             </div>
             <!-- Y-axis labels -->
             <div
-              class="absolute left-0 top-0 h-48 flex flex-col justify-between text-[9px] text-slate-600 font-mono px-1"
+              class="absolute left-0 top-0 h-48 flex flex-col justify-between text-[9px] text-slate-600 font-mono px-1 opacity-50"
             >
-              <span>60</span>
-              <span>45</span>
-              <span>30</span>
-              <span>15</span>
+              <span>{Math.round(maxTrendEvents)}</span>
+              <span>{Math.round(maxTrendEvents * 0.75)}</span>
+              <span>{Math.round(maxTrendEvents * 0.5)}</span>
+              <span>{Math.round(maxTrendEvents * 0.25)}</span>
               <span>0</span>
             </div>
           </div>

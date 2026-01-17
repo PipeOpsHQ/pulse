@@ -1851,9 +1851,12 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		timeRange = "7d"
 	}
 
+	trends, _ := GetHourlyStats(db, projectID)
+
 	insights := map[string]interface{}{
 		"time_range":   timeRange,
 		"generated_at": time.Now(),
+		"trends":       trends,
 	}
 
 	// Error Tracking Stats

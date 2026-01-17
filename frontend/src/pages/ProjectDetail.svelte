@@ -117,7 +117,9 @@
     const tabParam = urlParams.get("tab");
     if (
       tabParam &&
-      ["overview", "coverage", "monitors", "traces"].includes(tabParam)
+      ["overview", "coverage", "monitors", "traces", "issues"].includes(
+        tabParam,
+      )
     ) {
       activeTab = tabParam;
     }
@@ -559,6 +561,15 @@ Sentry.init({
         }}
       >
         Performance
+      </button>
+      <button
+        class="pb-3 text-xs font-semibold uppercase tracking-wider transition-all {activeTab ===
+        'issues'
+          ? 'border-b-2 border-pulse-500 text-white'
+          : 'text-slate-500 hover:text-white'}"
+        on:click={() => setActiveTab("issues")}
+      >
+        Issues
       </button>
       <button
         class="pb-3 text-xs font-semibold uppercase tracking-wider transition-all {activeTab ===
@@ -1271,6 +1282,83 @@ Sentry.init({
             {/if}
           </div>
         </div>
+      </div>
+    {/if}
+
+    {#if activeTab === "issues"}
+      <div class="space-y-4 animate-in fade-in duration-300">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-white">Project Issues</h2>
+        </div>
+
+        {#if (errors || []).length === 0}
+          <div
+            class="rounded-xl border border-white/10 bg-white/5 p-20 text-center"
+          >
+            <div
+              class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-pulse-500/10 text-pulse-400"
+            >
+              <AlertCircle size={32} />
+            </div>
+            <h3 class="mb-1 text-base font-semibold text-white">
+              No issues found
+            </h3>
+            <p class="text-sm text-slate-500">
+              This project hasn't reported any errors yet.
+            </p>
+          </div>
+        {:else}
+          <div
+            class="rounded-xl border border-white/10 bg-white/5 overflow-hidden"
+          >
+            <div class="divide-y divide-white/[0.06]">
+              {#each errors as error}
+                {@const levelColors = getErrorLevelColor(error.level)}
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="group flex items-center gap-4 px-4 py-3.5 transition-all hover:bg-white/[0.03] cursor-pointer"
+                  on:click={() => navigate(`/errors/${error.id}`)}
+                  on:keydown={(e) =>
+                    e.key === "Enter" && navigate(`/errors/${error.id}`)}
+                >
+                  <div
+                    class="h-10 w-0.5 shrink-0 rounded-full transition-all group-hover:w-1 {levelColors.dot}"
+                  ></div>
+                  <div class="flex-1 min-w-0">
+                    <div
+                      class="truncate text-xs font-semibold text-white group-hover:text-pulse-400 transition-colors"
+                    >
+                      {error.message || "No message"}
+                    </div>
+                    <div
+                      class="mt-1 flex items-center gap-2 text-[10px] text-slate-500"
+                    >
+                      <span
+                        class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight {getLevelColorClass(
+                          error.level,
+                        )}"
+                      >
+                        {error.level}
+                      </span>
+                      {#if error.environment}
+                        <span class="rounded bg-white/5 px-1.5 py-0.5"
+                          >{error.environment}</span
+                        >
+                      {/if}
+                      <span>•</span>
+                      <span>{formatDate(error.created_at)}</span>
+                    </div>
+                  </div>
+                  <ChevronRight
+                    size={16}
+                    class="text-slate-700 transition-transform group-hover:translate-x-1 group-hover:text-white"
+                  />
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
     {/if}
 
