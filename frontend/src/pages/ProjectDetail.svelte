@@ -66,7 +66,7 @@
       (project.coverage && project.coverage > 0));
 
   $: dsn = project
-    ? `http://${project.api_key}@${window.location.host}/${project.id}`
+    ? `https://${project.api_key}@${window.location.host}/${project.id}`
     : "";
 
   let projectId = "";
@@ -281,7 +281,7 @@
 
   function getStatusPageUrl() {
     if (!project) return "";
-    return `${window.location.protocol}//${window.location.host}/status/${projectId}`;
+    return `https://${window.location.host}/status/${projectId}`;
   }
 
   let selectedTrace = null;
@@ -304,14 +304,14 @@
   }
 
   $: curlCoverageExample = project
-    ? `curl -X POST "${window.location.protocol}//${window.location.host}/api/${project.id}/coverage" \\
+    ? `curl -X POST "https://${window.location.host}/api/${project.id}/coverage" \\
   -H "X-Pulse-Auth: ${project.api_key}" \\
   -H "Content-Type: application/json" \\
   -d '{"coverage": 84.5}'`
     : "";
 
   $: curlFileExample = project
-    ? `curl -X POST "${window.location.protocol}//${window.location.host}/api/${project.id}/coverage" \\
+    ? `curl -X POST "https://${window.location.host}/api/${project.id}/coverage" \\
   -H "X-Pulse-Auth: ${project.api_key}" \\
   -F "file=@coverage.out"`
     : "";
@@ -327,7 +327,7 @@ Sentry.init({
     : "";
 
   $: curlErrorExample = project
-    ? `curl -X POST "${window.location.protocol}//${window.location.host}/api/${project.id}/store/" \\
+    ? `curl -X POST "https://${window.location.host}/api/${project.id}/store/" \\
   -H "X-Sentry-Auth: Sentry sentry_key=${project.api_key}, sentry_version=7" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -338,7 +338,7 @@ Sentry.init({
     : "";
 
   $: curlSimpleExample = project
-    ? `curl -X POST "${window.location.protocol}//${window.location.host}/api/${project.id}/store/" \\
+    ? `curl -X POST "https://${window.location.host}/api/${project.id}/store/" \\
   -H "X-Pulse-Auth: ${project.api_key}" \\
   -H "Content-Type: application/json" \\
   -d '{"message": "Test error", "level": "error"}'`
@@ -377,7 +377,7 @@ Sentry.init({
         })();
 
   $: badgeMarkdown = project
-    ? `[![Coverage State](${window.location.protocol}//${window.location.host}/api/projects/${project.id}/coverage/badge)](#)`
+    ? `[![Coverage State](https://${window.location.host}/api/projects/${project.id}/coverage/badge)](#)`
     : "";
 </script>
 
