@@ -532,6 +532,15 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 		log.Printf("[DSN Debug] Processing transaction %s for project %s", tx.Transaction, projectID)
 
+		// Quota check for transactions
+		project, err := GetProject(db, projectID)
+		if err == nil {
+			if project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth {
+				http.Error(w, "Monthly event quota exceeded", http.StatusTooManyRequests)
+				return
+			}
+		}
+
 		// Convert root transaction to Span
 		startTime := time.Now()
 		endTime := time.Now()
@@ -819,6 +828,14 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Parse Envelope (properly using length headers)
 	reader := bytes.NewReader(body)
 
+	// Get project for quota check early
+	project, err := GetProject(db, projectID)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+	hasQuota := project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth
+
 	// Read Envelope Header (first line)
 	headerLine, err := readEnvelopeLine(reader)
 	if err != nil {
@@ -863,6 +880,11 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			var tx SentryTransaction
 			if err := json.Unmarshal(payload, &tx); err != nil {
 				log.Printf("[DSN Debug] Failed to unmarshal transaction: %v", err)
+				continue
+			}
+
+			if hasQuota {
+				log.Printf("[DSN Debug] Quota exceeded for project %s skipping transaction", projectID)
 				continue
 			}
 
@@ -962,6 +984,11 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			var evt SentryEvent
 			if err := json.Unmarshal(payload, &evt); err != nil {
 				log.Printf("[DSN Debug] Failed to unmarshal event: %v", err)
+				continue
+			}
+
+			if hasQuota {
+				log.Printf("[DSN Debug] Quota exceeded for project %s skipping error event", projectID)
 				continue
 			}
 
@@ -1160,25 +1187,48 @@ func updateProjectQuota(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	id := vars["id"]
 
 	var req struct {
-		Quota int `json:"quota"`
+		Quota             int `json:"quota"`
+		MaxEventsPerMonth int `json:"max_events_per_month"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[Quota Debug] Failed to decode request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if req.Quota < 0 {
+	log.Printf("[Quota Debug] Updating quota for project %s. Raw: %+v", id, req)
+
+	quota := req.MaxEventsPerMonth
+	if quota == 0 && req.Quota != 0 {
+		quota = req.Quota
+	}
+
+	if quota < 0 {
 		http.Error(w, "Quota must be non-negative", http.StatusBadRequest)
 		return
 	}
 
-	err := UpdateProjectQuota(db, id, req.Quota)
+	res, err := db.Exec("UPDATE projects SET max_events_per_month = ? WHERE id = ?", quota, id)
 	if err != nil {
 		http.Error(w, "Failed to update project quota", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, "Project not found or no change made", http.StatusNotFound)
+		return
+	}
+
+	// Return the updated project
+	project, err := GetProject(db, id)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(project)
 }
 
 // healthCheck returns a 200 OK status
