@@ -1696,9 +1696,10 @@ Sentry.init({
               {/each}
             </div>
           {/if}
+        </div>
       </div>
     {/if}
-{:else}
+  {:else}
     <div class="flex flex-col items-center justify-center py-20 text-center">
       <h2 class="text-lg font-semibold text-white">Project Not Found</h2>
       <Link to="/" class="mt-4 text-pulse-400 hover:underline"
@@ -1756,16 +1757,28 @@ Sentry.init({
           class="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/10"
         >
           {#if loadingDetails}
-            <div class="flex flex-col items-center justify-center py-20 text-center">
-              <div class="h-12 w-12 animate-spin rounded-full border-4 border-pulse-500/20 border-t-pulse-500"></div>
-              <span class="mt-4 text-slate-400 font-medium">Analysing snapshots...</span>
+            <div
+              class="flex flex-col items-center justify-center py-20 text-center"
+            >
+              <div
+                class="h-12 w-12 animate-spin rounded-full border-4 border-pulse-500/20 border-t-pulse-500"
+              ></div>
+              <span class="mt-4 text-slate-400 font-medium"
+                >Analysing snapshots...</span
+              >
             </div>
           {:else if detailedFiles.length === 0}
-            <div class="flex flex-col items-center justify-center py-20 text-center rounded-xl bg-white/[0.02] border border-dashed border-white/10">
-              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white/5 text-slate-500 mb-4">
+            <div
+              class="flex flex-col items-center justify-center py-20 text-center rounded-xl bg-white/[0.02] border border-dashed border-white/10"
+            >
+              <div
+                class="flex h-12 w-12 items-center justify-center rounded-full bg-white/5 text-slate-500 mb-4"
+              >
                 <Search size={24} />
               </div>
-              <span class="text-slate-500 italic">No per-file mapping available.</span>
+              <span class="text-slate-500 italic"
+                >No per-file mapping available.</span
+              >
               <p class="mt-2 text-xs text-slate-600 max-w-sm">
                 Detailed reports are generated automatically when uploading raw
                 coverage files (coverage.out, lcov.info). Percentage-only
