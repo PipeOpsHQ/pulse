@@ -25,6 +25,8 @@
     FileCode,
     GitBranch,
     Copy,
+    ChevronDown,
+    ChevronRight as ChevronRightIcon,
   } from "lucide-svelte";
 
   let error = null;
@@ -36,6 +38,21 @@
   let user = null;
   let tags = null;
   let stackTraceView = "frames"; // 'raw', 'frames', 'code', 'tree'
+  let expandedFrames = new Set();
+  let showFullStacktrace = false;
+
+  function toggleFrame(index) {
+    if (expandedFrames.has(index)) {
+      expandedFrames.delete(index);
+    } else {
+      expandedFrames.add(index);
+    }
+    expandedFrames = expandedFrames; // trigger reactivity
+  }
+
+  function frameIsInApp(frame) {
+    return frame.in_app !== false;
+  }
 
   onMount(async () => {
     const path = window.location.pathname;
@@ -338,7 +355,7 @@
                 <Code size={14} class="text-pulse-400" />
                 <span>Stack Trace</span>
               </h2>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-4">
                 <!-- View Toggle Buttons -->
                 <div
                   class="flex items-center gap-1 rounded-lg border border-white/10 bg-black/40 p-1"
@@ -352,16 +369,6 @@
                     title="Frames View"
                   >
                     <List size={12} class="inline" />
-                  </button>
-                  <button
-                    class="px-2 py-1 text-[10px] font-bold uppercase transition-all {stackTraceView ===
-                    'code'
-                      ? 'bg-pulse-500 text-white'
-                      : 'text-slate-500 hover:text-white'}"
-                    on:click={() => (stackTraceView = "code")}
-                    title="Code View"
-                  >
-                    <FileCode size={12} class="inline" />
                   </button>
                   <button
                     class="px-2 py-1 text-[10px] font-bold uppercase transition-all {stackTraceView ===
@@ -384,6 +391,31 @@
                     <Code size={12} class="inline" />
                   </button>
                 </div>
+
+                <!-- Full/In-App Toggle -->
+                <div class="flex items-center gap-2">
+                  <span
+                    class="text-[9px] font-bold text-slate-500 uppercase tracking-widest"
+                    >Full</span
+                  >
+                  <button
+                    class="relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none {showFullStacktrace
+                      ? 'bg-pulse-600'
+                      : 'bg-white/10'}"
+                    on:click={() => (showFullStacktrace = !showFullStacktrace)}
+                  >
+                    <span
+                      class="pointer-events-none inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow-lg transition duration-200 {showFullStacktrace
+                        ? 'translate-x-4.5'
+                        : 'translate-x-1'}"
+                    ></span>
+                  </button>
+                  <span
+                    class="text-[9px] font-bold text-slate-300 uppercase tracking-widest"
+                    >In-App</span
+                  >
+                </div>
+
                 <button
                   class="flex items-center gap-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-bold text-slate-400 hover:text-white transition-colors"
                   on:click={() =>
@@ -395,9 +427,8 @@
               </div>
             </div>
 
-            <div class="overflow-x-auto">
+            <div class="overflow-hidden">
               {#if stackTraceView === "raw"}
-                <!-- Raw JSON View -->
                 <div class="p-6">
                   <pre
                     class="font-mono text-xs leading-relaxed text-slate-300"><code
@@ -405,270 +436,244 @@
                     ></pre>
                 </div>
               {:else if stackTraceView === "frames"}
-                <!-- Frames List View -->
-                <div class="divide-y divide-white/5">
-                  {#each getFrames() as frame, index}
+                {@const filteredFrames = (getFrames() || []).filter(
+                  (f) => showFullStacktrace || f.in_app !== false,
+                )}
+                <div class="divide-y divide-white/[0.03]">
+                  {#each filteredFrames as frame, index}
+                    {@const isExpanded = expandedFrames.has(index)}
                     {@const isInApp = frame.in_app !== false}
                     <div
-                      class="group p-4 transition-colors hover:bg-white/5 {getInAppClass(
-                        isInApp,
-                      )} border-l-4 {isInApp
-                        ? 'border-pulse-500'
-                        : 'border-slate-500/30'}"
+                      class="group transition-all duration-200 {isInApp
+                        ? 'bg-pulse-500/[0.02]'
+                        : 'bg-transparent opacity-60'}"
                     >
-                      <div class="flex items-start justify-between gap-4">
-                        <div class="flex-1 min-w-0">
-                          <div class="mb-1 flex items-center gap-2">
-                            <span
-                              class="font-mono text-xs font-bold text-pulse-400"
-                              >#{getFrames().length - index}</span
-                            >
-                            {#if frame.function}
-                              <span
-                                class="font-mono text-sm font-semibold text-white"
-                                >{frame.function}</span
-                              >
-                            {/if}
-                            {#if isInApp}
-                              <span
-                                class="rounded bg-pulse-500/20 px-1.5 py-0.5 text-[9px] font-bold text-pulse-300"
-                                >IN-APP</span
-                              >
-                            {/if}
-                          </div>
-                          {#if frame.filename}
-                            <div
-                              class="mb-2 flex items-center gap-2 text-xs text-slate-400"
-                            >
-                              <FileCode size={12} />
-                              <span class="font-mono">{frame.filename}</span>
-                              {#if frame.lineno}
-                                <span class="text-pulse-400"
-                                  >:{frame.lineno}</span
-                                >
-                              {/if}
-                            </div>
-                          {/if}
-                          {#if frame.context_line}
-                            <div
-                              class="mt-2 rounded-lg border border-white/10 bg-black/60 p-3"
-                            >
-                              <pre
-                                class="font-mono text-xs text-slate-300">{frame.context_line}</pre>
-                            </div>
-                          {/if}
-                          {#if frame.vars && Object.keys(frame.vars).length > 0}
-                            <div class="mt-2 space-y-1">
-                              {#each Object.entries(frame.vars) as [key, value]}
-                                <div class="flex items-start gap-2 text-xs">
-                                  <span class="font-bold text-slate-500"
-                                    >{key}:</span
-                                  >
-                                  <span
-                                    class="font-mono text-slate-300 break-all"
-                                    >{String(value)}</span
-                                  >
-                                </div>
-                              {/each}
-                            </div>
-                          {/if}
+                      <div
+                        role="button"
+                        tabindex="0"
+                        class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.05]"
+                        on:click={() => toggleFrame(index)}
+                        on:keydown={(e) =>
+                          e.key === "Enter" && toggleFrame(index)}
+                      >
+                        <div
+                          class="flex h-5 w-5 items-center justify-center rounded text-slate-500 transition-transform {isExpanded
+                            ? 'rotate-90'
+                            : ''}"
+                        >
+                          <ChevronRightIcon size={14} />
                         </div>
-                      </div>
-                    </div>
-                  {:else}
-                    <div class="p-8 text-center">
-                      <p class="text-sm text-slate-500">
-                        No stack frames available
-                      </p>
-                    </div>
-                  {/each}
-                </div>
-              {:else if stackTraceView === "code"}
-                <!-- Code Context View -->
-                <div class="divide-y divide-white/5">
-                  {#each getFrames() as frame, index}
-                    {@const isInApp = frame.in_app !== false}
-                    <div
-                      class="p-6 {getInAppClass(isInApp)} border-l-4 {isInApp
-                        ? 'border-pulse-500'
-                        : 'border-slate-500/30'}"
-                    >
-                      <div class="mb-4 flex items-center justify-between">
-                        <div>
-                          <div class="flex items-center gap-2 mb-1">
-                            <span
-                              class="font-mono text-xs font-bold text-pulse-400"
-                              >Frame #{getFrames().length - index}</span
-                            >
-                            {#if frame.function}
-                              <span
-                                class="font-mono text-sm font-semibold text-white"
-                                >{frame.function}</span
-                              >
-                            {/if}
-                          </div>
-                          {#if frame.filename}
-                            <div class="text-xs text-slate-400 font-mono">
-                              {frame.filename}{#if frame.lineno}:{frame.lineno}{/if}
-                            </div>
-                          {/if}
-                        </div>
-                        {#if isInApp}
+                        <div
+                          class="flex-1 min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1"
+                        >
                           <span
-                            class="rounded bg-pulse-500/20 px-2 py-1 text-[9px] font-bold text-pulse-300"
-                            >IN-APP</span
+                            class="font-mono text-[13px] font-bold {isInApp
+                              ? 'text-white'
+                              : 'text-slate-400'}"
+                            >{frame.function || "<anonymous>"}</span
                           >
-                        {/if}
+                          <div
+                            class="flex items-center gap-1.5 text-xs text-slate-500 font-mono italic"
+                          >
+                            <span>{formatFilename(frame.filename)}</span>
+                            {#if frame.lineno}<span
+                                class="text-pulse-500/70 font-bold"
+                                >:{frame.lineno}</span
+                              >{/if}
+                          </div>
+                          {#if isInApp}
+                            <span
+                              class="rounded-full bg-pulse-500/10 border border-pulse-500/20 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest text-pulse-400"
+                              >IN-APP</span
+                            >
+                          {/if}
+                        </div>
+                        <div
+                          class="text-[10px] font-mono text-slate-700 font-bold tabular-nums"
+                        >
+                          #{filteredFrames.length - index}
+                        </div>
                       </div>
 
-                      {#if frame.pre_context || frame.context_line || frame.post_context}
+                      {#if isExpanded}
                         <div
-                          class="rounded-lg border border-white/10 bg-black/60 overflow-hidden"
+                          class="px-4 pb-4 animate-in slide-in-from-top-2 duration-200"
                         >
-                          <div class="overflow-x-auto">
-                            <table class="w-full font-mono text-xs">
-                              <tbody>
-                                {#if frame.pre_context}
-                                  {#each frame.pre_context as line, i}
-                                    <tr class="text-slate-500">
-                                      <td
-                                        class="w-12 px-3 py-1 text-right select-none"
-                                        >{frame.lineno
-                                          ? frame.lineno -
-                                            frame.pre_context.length +
-                                            i
-                                          : ""}</td
+                          <div
+                            class="ml-8 overflow-hidden rounded-xl border border-white/10 bg-black/60"
+                          >
+                            {#if frame.pre_context || frame.context_line || frame.post_context}
+                              <div class="overflow-x-auto">
+                                <table
+                                  class="w-full font-mono text-[11px] leading-relaxed"
+                                >
+                                  <tbody>
+                                    {#if frame.pre_context}
+                                      {#each frame.pre_context as line, i}
+                                        <tr
+                                          class="text-slate-500 hover:bg-white/5 group/line"
+                                        >
+                                          <td
+                                            class="w-10 px-3 py-0.5 text-right select-none opacity-40 group-hover/line:opacity-100"
+                                            >{frame.lineno
+                                              ? frame.lineno -
+                                                frame.pre_context.length +
+                                                i
+                                              : ""}</td
+                                          >
+                                          <td class="px-3 py-0.5 whitespace-pre"
+                                            >{line}</td
+                                          >
+                                        </tr>
+                                      {/each}
+                                    {/if}
+                                    {#if frame.context_line}
+                                      <tr
+                                        class="bg-pulse-500/20 text-white font-medium border-l-2 border-pulse-500"
                                       >
-                                      <td class="px-3 py-1">{line}</td>
-                                    </tr>
-                                  {/each}
-                                {/if}
-                                {#if frame.context_line}
-                                  <tr
-                                    class="bg-pulse-500/10 border-l-2 border-pulse-500"
-                                  >
-                                    <td
-                                      class="w-12 px-3 py-1 text-right text-pulse-400 font-bold select-none"
-                                      >{frame.lineno || ""}</td
+                                        <td
+                                          class="w-10 px-3 py-1 text-right select-none text-pulse-400 font-bold"
+                                          >{frame.lineno || ""}</td
+                                        >
+                                        <td class="px-3 py-1 whitespace-pre"
+                                          >{frame.context_line}</td
+                                        >
+                                      </tr>
+                                    {/if}
+                                    {#if frame.post_context}
+                                      {#each frame.post_context as line, i}
+                                        <tr
+                                          class="text-slate-500 hover:bg-white/5 group/line"
+                                        >
+                                          <td
+                                            class="w-10 px-3 py-0.5 text-right select-none opacity-40 group-hover/line:opacity-100"
+                                            >{frame.lineno
+                                              ? frame.lineno + i + 1
+                                              : ""}</td
+                                          >
+                                          <td class="px-3 py-0.5 whitespace-pre"
+                                            >{line}</td
+                                          >
+                                        </tr>
+                                      {/each}
+                                    {/if}
+                                  </tbody>
+                                </table>
+                              </div>
+                            {:else if frame.context_line}
+                              <div class="p-4 bg-pulse-500/10">
+                                <pre
+                                  class="font-mono text-xs text-white whitespace-pre-wrap">{frame.context_line}</pre>
+                              </div>
+                            {:else}
+                              <div
+                                class="p-4 text-center text-[10px] text-slate-600 uppercase tracking-widest font-bold"
+                              >
+                                No source code context available
+                              </div>
+                            {/if}
+                            {#if frame.vars && Object.keys(frame.vars).length > 0}
+                              <div
+                                class="border-t border-white/5 bg-white/[0.02] p-4"
+                              >
+                                <div
+                                  class="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-2"
+                                >
+                                  Local Variables
+                                </div>
+                                <div
+                                  class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1"
+                                >
+                                  {#each Object.entries(frame.vars) as [key, value]}
+                                    <div
+                                      class="flex items-start gap-2 text-[11px] font-mono"
                                     >
-                                    <td
-                                      class="px-3 py-1 text-white font-semibold"
-                                      >{frame.context_line}</td
-                                    >
-                                  </tr>
-                                {/if}
-                                {#if frame.post_context}
-                                  {#each frame.post_context as line, i}
-                                    <tr class="text-slate-500">
-                                      <td
-                                        class="w-12 px-3 py-1 text-right select-none"
-                                        >{frame.lineno
-                                          ? frame.lineno + i + 1
-                                          : ""}</td
+                                      <span class="text-pulse-400/80 shrink-0"
+                                        >{key}</span
                                       >
-                                      <td class="px-3 py-1">{line}</td>
-                                    </tr>
+                                      <span class="text-slate-400 font-bold"
+                                        >=</span
+                                      >
+                                      <span class="text-slate-200 break-all"
+                                        >{JSON.stringify(value)}</span
+                                      >
+                                    </div>
                                   {/each}
-                                {/if}
-                              </tbody>
-                            </table>
+                                </div>
+                              </div>
+                            {/if}
                           </div>
-                        </div>
-                      {:else if frame.context_line}
-                        <div
-                          class="rounded-lg border border-white/10 bg-black/60 p-3"
-                        >
-                          <pre
-                            class="font-mono text-xs text-slate-300">{frame.context_line}</pre>
-                        </div>
-                      {:else}
-                        <div class="text-xs text-slate-500 italic">
-                          No code context available
                         </div>
                       {/if}
                     </div>
                   {:else}
-                    <div class="p-8 text-center">
-                      <p class="text-sm text-slate-500">
-                        No stack frames available
+                    <div class="p-16 text-center">
+                      <div
+                        class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/5 text-slate-600 mb-4"
+                      >
+                        <List size={24} />
+                      </div>
+                      <p class="text-sm font-medium text-slate-400">
+                        No frames match current filter
                       </p>
+                      <button
+                        class="mt-4 text-xs font-bold text-pulse-400 hover:text-pulse-300 transition-colors"
+                        on:click={() => (showFullStacktrace = true)}
+                        >Show hidden system frames</button
+                      >
                     </div>
                   {/each}
                 </div>
               {:else if stackTraceView === "tree"}
-                <!-- Tree/Hierarchical View -->
                 <div class="p-6">
                   <div class="space-y-2">
-                    {#each getFrames() as frame, index}
+                    {#each getFrames() || [] as frame, index}
                       {@const isInApp = frame.in_app !== false}
                       {@const isLast = index === getFrames().length - 1}
                       <div class="flex items-start gap-3">
                         <div class="flex flex-col items-center pt-1">
-                          {#if !isLast}
-                            <div class="h-6 w-0.5 bg-white/10"></div>
-                          {/if}
                           <div
                             class="flex h-6 w-6 items-center justify-center rounded-full {isInApp
                               ? 'bg-pulse-500 text-white'
-                              : 'bg-slate-500/30 text-slate-400'} text-[10px] font-bold"
+                              : 'bg-slate-500/30 text-slate-400'} text-[10px] font-bold shadow-sm"
                           >
                             {getFrames().length - index}
                           </div>
-                          {#if !isLast}
-                            <div class="h-6 w-0.5 bg-white/10"></div>
-                          {/if}
+                          {#if !isLast}<div
+                              class="h-full w-0.5 bg-white/10 my-1"
+                            ></div>{/if}
                         </div>
-                        <div class="flex-1 min-w-0 pb-4">
+                        <div class="flex-1 min-w-0 pb-6">
                           <div
-                            class="rounded-lg border border-white/10 bg-white/5 p-4 {getInAppClass(
-                              isInApp,
-                            )}"
+                            class="rounded-xl border border-white/5 bg-white/[0.03] p-4 group transition-colors hover:border-white/10"
                           >
                             <div class="mb-2 flex items-center gap-2">
-                              {#if frame.function}
-                                <span
-                                  class="font-mono text-sm font-semibold text-white"
-                                  >{frame.function}</span
-                                >
-                              {/if}
-                              {#if isInApp}
-                                <span
-                                  class="rounded bg-pulse-500/20 px-1.5 py-0.5 text-[9px] font-bold text-pulse-300"
+                              <span
+                                class="font-mono text-sm font-bold {isInApp
+                                  ? 'text-white'
+                                  : 'text-slate-400'}"
+                                >{frame.function || "<anonymous>"}</span
+                              >
+                              {#if isInApp}<span
+                                  class="rounded bg-pulse-500/20 px-1.5 py-0.5 text-[8px] font-bold text-pulse-300 uppercase tracking-widest"
                                   >IN-APP</span
-                                >
-                              {/if}
+                                >{/if}
                             </div>
-                            {#if frame.filename}
-                              <div
-                                class="mb-2 flex items-center gap-2 text-xs text-slate-400"
-                              >
-                                <FileCode size={12} />
-                                <span class="font-mono"
-                                  >{formatFilename(frame.filename)}</span
-                                >
-                                {#if frame.lineno}
-                                  <span class="text-pulse-400"
-                                    >:{frame.lineno}</span
-                                  >
-                                {/if}
-                              </div>
-                            {/if}
-                            {#if frame.context_line}
-                              <div
-                                class="mt-2 rounded border border-white/10 bg-black/60 p-2"
-                              >
-                                <pre
-                                  class="font-mono text-xs text-slate-300">{frame.context_line}</pre>
-                              </div>
-                            {/if}
+                            <div
+                              class="flex items-center gap-2 text-xs text-slate-500 font-mono"
+                            >
+                              <FileCode size={12} />
+                              <span>{formatFilename(frame.filename)}</span>
+                              {#if frame.lineno}<span class="text-pulse-400"
+                                  >:{frame.lineno}</span
+                                >{/if}
+                            </div>
                           </div>
                         </div>
                       </div>
                     {:else}
-                      <div class="p-8 text-center">
-                        <p class="text-sm text-slate-500">
-                          No stack frames available
-                        </p>
+                      <div class="p-16 text-center text-slate-500 italic">
+                        No frames available
                       </div>
                     {/each}
                   </div>

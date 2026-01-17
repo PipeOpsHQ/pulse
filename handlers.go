@@ -2289,3 +2289,15 @@ func updateProjectSettings(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+func getSystemStats(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	stats, err := GetSystemStats(db)
+	if err != nil {
+		log.Printf("Error fetching system stats: %v", err)
+		http.Error(w, "Failed to fetch system stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}

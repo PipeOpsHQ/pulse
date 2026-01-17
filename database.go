@@ -1292,3 +1292,32 @@ func UpdateProjectName(db *sql.DB, projectID, name string) error {
 	_, err := db.Exec("UPDATE projects SET name = ? WHERE id = ?", name, projectID)
 	return err
 }
+
+type SystemStats struct {
+	Projects          int    `json:"projects"`
+	Users             int    `json:"users"`
+	Errors            int    `json:"errors"`
+	Spans             int    `json:"spans"`
+	Monitors          int    `json:"monitors"`
+	CoverageSnapshots int    `json:"coverage_snapshots"`
+	DatabaseSize      int64  `json:"database_size"`
+	DatabasePath      string `json:"database_path"`
+}
+
+func GetSystemStats(db *sql.DB) (SystemStats, error) {
+	var stats SystemStats
+
+	db.QueryRow("SELECT COUNT(*) FROM projects").Scan(&stats.Projects)
+	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&stats.Users)
+	db.QueryRow("SELECT COUNT(*) FROM errors").Scan(&stats.Errors)
+	db.QueryRow("SELECT COUNT(*) FROM spans").Scan(&stats.Spans)
+	db.QueryRow("SELECT COUNT(*) FROM monitors").Scan(&stats.Monitors)
+	db.QueryRow("SELECT COUNT(*) FROM coverage_history").Scan(&stats.CoverageSnapshots)
+
+	stats.DatabasePath = "./pulse.db" // Matches main.go's default
+	if fileInfo, err := os.Stat(stats.DatabasePath); err == nil {
+		stats.DatabaseSize = fileInfo.Size()
+	}
+
+	return stats, nil
+}

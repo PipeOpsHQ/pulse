@@ -14,6 +14,7 @@
   import TraceDetail from "./pages/TraceDetail.svelte";
   import StatusPage from "./pages/StatusPage.svelte";
   import Insights from "./pages/Insights.svelte";
+  import Admin from "./pages/Admin.svelte";
   import Landing from "./pages/Landing.svelte";
   import { onMount } from "svelte";
   import { isAuthenticated } from "./stores/auth";
@@ -79,6 +80,8 @@
       crumbs.push({ label: "Insights", path: "/insights" });
     } else if (path === "/security-vault") {
       crumbs.push({ label: "Security Vault", path: "/security-vault" });
+    } else if (path === "/admin") {
+      crumbs.push({ label: "Admin", path: "/admin" });
     }
 
     return crumbs;
@@ -130,6 +133,8 @@
             <Insights />
           {:else if currentPath === "/security-vault"}
             <SecurityVault />
+          {:else if currentPath === "/admin"}
+            <Admin />
           {:else if currentPath.startsWith("/errors/")}
             <IssueDetail />
           {:else if currentPath.startsWith("/projects/")}

@@ -208,9 +208,12 @@ func main() {
 		getStatusPage(w, r, db)
 	}).Methods("GET", "OPTIONS")
 
-	// Insights endpoint
 	api.HandleFunc("/insights", func(w http.ResponseWriter, r *http.Request) {
 		getInsights(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
+	api.HandleFunc("/admin/stats", func(w http.ResponseWriter, r *http.Request) {
+		getSystemStats(w, r, db)
 	}).Methods("GET", "OPTIONS")
 
 	api.HandleFunc("/projects/{projectId}/traces/{traceId}", func(w http.ResponseWriter, r *http.Request) {
