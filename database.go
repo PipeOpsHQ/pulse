@@ -1420,21 +1420,26 @@ func GetSystemStats(db *sql.DB) (SystemStats, error) {
 	return stats, nil
 }
 
-func GetAllRootSpans(db *sql.DB, query string, limit, offset int) ([]TraceSpan, error) {
+func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]TraceSpan, error) {
 	sqlQuery := `
 		SELECT id, project_id, trace_id, span_id, parent_span_id,
 		       name, op, description, start_timestamp, timestamp, status, data
 		FROM spans
 		WHERE (parent_span_id IS NULL OR parent_span_id = '')`
-	
+
 	args := []interface{}{}
-	
+
+	if projectID != "" {
+		sqlQuery += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+
 	if query != "" {
 		sqlQuery += " AND (name LIKE ? OR op LIKE ? OR description LIKE ?)"
 		q := "%" + query + "%"
 		args = append(args, q, q, q)
 	}
-	
+
 	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
@@ -1448,7 +1453,7 @@ func GetAllRootSpans(db *sql.DB, query string, limit, offset int) ([]TraceSpan, 
 	for rows.Next() {
 		var s TraceSpan
 		err := rows.Scan(
-&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
+			&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
 			&s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data,
 		)
 		if err != nil {

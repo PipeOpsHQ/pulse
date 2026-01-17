@@ -2362,8 +2362,9 @@ func getAllTraces(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	query := r.URL.Query().Get("query")
+	projectID := r.URL.Query().Get("project_id")
 
-	spans, err := GetAllRootSpans(db, query, limit, offset)
+	spans, err := GetAllRootSpans(db, projectID, query, limit, offset)
 	if err != nil {
 		http.Error(w, "Failed to fetch traces", http.StatusInternalServerError)
 		return

@@ -7,8 +7,10 @@
   import { Activity, Search, Timer, ChevronRight, Filter } from "lucide-svelte";
 
   let traces = [];
+  let projects = [];
   let loading = true;
   let traceQuery = "";
+  let selectedProject = "";
   let loadingMore = false;
   let hasMore = true;
   let limit = 50;
@@ -24,9 +26,11 @@
 
     try {
       const offset = loadMore ? traces.length : 0;
-      const res = await api.get(
-        `/traces?limit=${limit}&offset=${offset}&query=${encodeURIComponent(traceQuery)}`,
-      );
+      let url = `/traces?limit=${limit}&offset=${offset}&query=${encodeURIComponent(traceQuery)}`;
+      if (selectedProject) {
+        url += `&project_id=${selectedProject}`;
+      }
+      const res = await api.get(url);
       const newTraces = res || [];
 
       if (loadMore) {
@@ -43,6 +47,15 @@
     } finally {
       loading = false;
       loadingMore = false;
+    }
+  }
+
+  async function loadProjects() {
+    try {
+      const res = await api.get("/projects");
+      projects = res || [];
+    } catch (err) {
+      console.error("Failed to load projects:", err);
     }
   }
 
@@ -84,6 +97,7 @@
   }
 
   onMount(() => {
+    loadProjects();
     loadTraces();
   });
 </script>
@@ -119,9 +133,9 @@
       </div>
     </div>
 
-    <!-- Search Bar -->
+    <!-- Search and Filter Bar -->
     <div class="mb-6 flex items-center gap-3">
-      <div class="relative flex-1 max-w-2xl">
+      <div class="relative flex-1 max-w-md">
         <div
           class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"
         >
@@ -135,6 +149,23 @@
           class="block w-full pl-12 pr-4 py-3 border border-white/10 rounded-xl bg-black/20 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
         />
       </div>
+      <div class="relative">
+        <div
+          class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none"
+        >
+          <Filter size={16} class="text-slate-500" />
+        </div>
+        <select
+          bind:value={selectedProject}
+          on:change={() => loadTraces()}
+          class="block pl-11 pr-10 py-3 border border-white/10 rounded-xl bg-black/20 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all appearance-none cursor-pointer"
+        >
+          <option value="">All Projects</option>
+          {#each projects as project}
+            <option value={project.id}>{project.name}</option>
+          {/each}
+        </select>
+      </div>
       <button
         on:click={() => loadTraces()}
         class="px-6 py-3 bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold rounded-xl transition-colors"
@@ -144,6 +175,7 @@
       <button
         on:click={() => {
           traceQuery = "";
+          selectedProject = "";
           loadTraces();
         }}
         class="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-bold rounded-xl transition-colors"

@@ -1397,6 +1397,27 @@ Sentry.init({
                       >
                         {error.level}
                       </span>
+                      {#if error.status}
+                        {#if error.status === "resolved"}
+                          <span
+                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-green-500/10 border border-green-500/20 text-green-400"
+                          >
+                            ● Resolved
+                          </span>
+                        {:else if error.status === "ignored"}
+                          <span
+                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-slate-500/10 border border-slate-500/20 text-slate-400"
+                          >
+                            ● Ignored
+                          </span>
+                        {:else}
+                          <span
+                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-red-500/10 border border-red-500/20 text-red-400"
+                          >
+                            ● Unresolved
+                          </span>
+                        {/if}
+                      {/if}
                       {#if error.environment}
                         <span class="rounded bg-white/5 px-1.5 py-0.5"
                           >{error.environment}</span
