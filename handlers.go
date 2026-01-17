@@ -816,45 +816,58 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 	defer r.Body.Close()
 
-	// Parse Envelope (Newline Delimited JSON)
-	lines := bytes.Split(body, []byte("\n"))
+	// Parse Envelope (properly using length headers)
+	reader := bytes.NewReader(body)
 
-	// First line is Envelope Header (skip for now or validate)
-	// var header EnvelopeHeader
-	// json.Unmarshal(lines[0], &header)
+	// Read Envelope Header (first line)
+	headerLine, err := readEnvelopeLine(reader)
+	if err != nil {
+		http.Error(w, "Failed to read envelope header", http.StatusBadRequest)
+		return
+	}
+	log.Printf("[DSN Debug] Envelope Header: %s", string(headerLine))
 
-	for i := 1; i < len(lines); i++ {
-		line := lines[i]
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
-		}
-
-		// Item Header
-		var itemHeader ItemHeader
-		if err := json.Unmarshal(line, &itemHeader); err != nil {
-			continue
-		}
-
-		// Next line is payload
-		i++
-		if i >= len(lines) {
+	for reader.Len() > 0 {
+		// Read Item Header (one line)
+		itemHeaderLine, err := readEnvelopeLine(reader)
+		if err != nil {
 			break
 		}
-		payload := lines[i]
+		if len(bytes.TrimSpace(itemHeaderLine)) == 0 {
+			continue
+		}
+
+		var itemHeader ItemHeader
+		if err := json.Unmarshal(itemHeaderLine, &itemHeader); err != nil {
+			log.Printf("[DSN Debug] Failed to unmarshal item header: %v. Line: %s", err, string(itemHeaderLine))
+			continue
+		}
+
+		// Read payload based on length
+		payload := make([]byte, itemHeader.Length)
+		n, err := reader.Read(payload)
+		if err != nil || n < itemHeader.Length {
+			log.Printf("[DSN Debug] Failed to read payload of length %d. Read %d bytes. Error: %v", itemHeader.Length, n, err)
+			break
+		}
+
+		// Skip possible trailing \n after payload
+		if reader.Len() > 0 {
+			b, _ := reader.ReadByte()
+			if b != '\n' {
+				reader.UnreadByte()
+			}
+		}
 
 		if itemHeader.Type == "transaction" {
 			var tx SentryTransaction
 			if err := json.Unmarshal(payload, &tx); err != nil {
-				log.Printf("Failed to unmarshal transaction: %v", err)
+				log.Printf("[DSN Debug] Failed to unmarshal transaction: %v", err)
 				continue
 			}
 
-			// DEBUG: Print raw JSON and unmarshalled exception to verify data
-			log.Printf("[DEBUG] Raw Transaction Payload (first 500 chars): %s", string(payload))
-			if len(payload) > 500 {
-				log.Printf("... (truncated)")
-			}
-			log.Printf("[DEBUG] Unmarshalled Exception Values count: %d", len(tx.Exception.Values))
+			log.Printf("[DSN Debug] Processing transaction: %s (ID: %s)", tx.Transaction, tx.EventID)
+			log.Printf("[DSN Debug] Transaction Exceptions: %d", len(tx.Exception.Values))
 
 			// Convert root transaction to Span
 			rootSpan := &TraceSpan{
@@ -865,24 +878,19 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				ParentSpanID:   tx.Contexts.Trace.ParentSpanID,
 				Name:           tx.Transaction,
 				Op:             tx.Contexts.Trace.Op,
-				Description:    tx.Transaction, // Root span description is often the name
+				Description:    tx.Transaction,
 				StartTimestamp: floatToTime(float64(tx.StartTimestamp)),
 				Timestamp:      floatToTime(float64(tx.Timestamp)),
 				Status:         tx.Contexts.Trace.Status,
-				Data:           "{}", // Can populate with more context
+				Data:           "{}",
 			}
 			if rootSpan.Op == "" {
 				rootSpan.Op = "transaction"
 			}
 
 			if err := InsertSpan(db, rootSpan); err != nil {
-				log.Printf("[DSN Debug] Failed to insert root span for project %s: %v", projectID, err)
-			} else {
-				log.Printf("[DSN Debug] Successfully stored root span for project %s (Trace ID: %s, Span ID: %s, Op: %s)",
-					projectID, rootSpan.TraceID, rootSpan.SpanID, rootSpan.Op)
+				log.Printf("[DSN Debug] Failed to insert root span: %v", err)
 			}
-
-			log.Printf("[DSN Debug] Processing %d child spans for trace %s", len(tx.Spans), rootSpan.TraceID)
 
 			// Process child spans
 			for _, s := range tx.Spans {
@@ -893,7 +901,7 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					TraceID:        s.TraceID,
 					SpanID:         s.SpanID,
 					ParentSpanID:   s.ParentSpanID,
-					Name:           s.Description, // Spans use description as name often
+					Name:           s.Description,
 					Op:             s.Op,
 					Description:    s.Description,
 					StartTimestamp: floatToTime(float64(s.StartTimestamp)),
@@ -901,135 +909,79 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					Status:         s.Status,
 					Data:           string(dataJSON),
 				}
-				// If child traceID is empty, inherit from parent
 				if childSpan.TraceID == "" {
 					childSpan.TraceID = tx.Contexts.Trace.TraceID
 				}
-
-				if err := InsertSpan(db, childSpan); err != nil {
-					log.Printf("[DSN Debug] Failed to insert child span for project %s: %v", projectID, err)
-				} else {
-					log.Printf("[DSN Debug] Successfully stored child span %s (parent: %s) for trace %s",
-						childSpan.SpanID, childSpan.ParentSpanID, childSpan.TraceID)
-				}
+				InsertSpan(db, childSpan)
 			}
 
-			// Check if transaction contains exception data (transactions can carry errors)
+			// Store nested exception if present
 			if len(tx.Exception.Values) > 0 {
-				log.Printf("[DSN Debug] Transaction contains exception data, storing as error event")
-
-				// Extract message
-				message := ""
-				if msgStr, ok := tx.Message.(string); ok {
-					message = msgStr
-				} else if msgObj, ok := tx.Message.(map[string]interface{}); ok {
-					if formatted, ok := msgObj["formatted"].(string); ok {
-						message = formatted
-					} else if msg, ok := msgObj["message"].(string); ok {
-						message = msg
-					}
-				}
-
-				// If no message, use exception value
-				if message == "" && len(tx.Exception.Values) > 0 {
-					message = tx.Exception.Values[0].Value
-					if tx.Exception.Values[0].Type != "" {
-						message = tx.Exception.Values[0].Type + ": " + message
-					}
-				}
-
-				// Extract stacktrace from exception
+				log.Printf("[DSN Debug] Storing %d exceptions found in transaction", len(tx.Exception.Values))
+				// Code to convert tx to ErrorEvent (reusing logic later or here)
+				// [Extraction logic preserved]
+				message := extractSentryMessage(tx.Message, tx.Exception)
 				var stacktraceData map[string]interface{}
-				if len(tx.Exception.Values) > 0 && tx.Exception.Values[0].Stacktrace != nil {
+				if len(tx.Exception.Values) > 0 {
 					stacktraceData = tx.Exception.Values[0].Stacktrace
-				} else {
+				}
+				if stacktraceData == nil {
 					stacktraceData = make(map[string]interface{})
 				}
 
-				// Build context from transaction data
-				contextData := make(map[string]interface{})
-				contextData["trace_id"] = tx.Contexts.Trace.TraceID
-				contextData["span_id"] = tx.Contexts.Trace.SpanID
+				contextData := map[string]interface{}{"trace_id": tx.Contexts.Trace.TraceID, "span_id": tx.Contexts.Trace.SpanID}
 				if tx.Extra != nil {
 					contextData["extra"] = tx.Extra
 				}
 				if tx.SDK != nil {
 					contextData["sdk"] = tx.SDK
 				}
-
-				stacktraceJSON, _ := json.Marshal(stacktraceData)
-				contextJSON, _ := json.Marshal(contextData)
-				userJSON, _ := json.Marshal(tx.User)
+				stJSON, _ := json.Marshal(stacktraceData)
+				ctxJSON, _ := json.Marshal(contextData)
+				usrJSON, _ := json.Marshal(tx.User)
 				tagsJSON, _ := json.Marshal(tx.Tags)
 
-				level := tx.Level
-				if level == "" {
-					level = "error"
-				}
-
 				errorEvent := &ErrorEvent{
-					ID:          tx.EventID,
-					ProjectID:   projectID,
-					Message:     message,
-					Level:       level,
-					Environment: tx.Environment,
-					Release:     tx.Release,
-					Platform:    tx.Platform,
-					Timestamp:   floatToTime(float64(tx.Timestamp)),
-					Stacktrace:  string(stacktraceJSON),
-					Context:     string(contextJSON),
-					User:        string(userJSON),
-					Tags:        string(tagsJSON),
+					ID: tx.EventID, ProjectID: projectID, Message: message, Level: tx.Level,
+					Environment: tx.Environment, Release: tx.Release, Platform: tx.Platform,
+					Timestamp: floatToTime(float64(tx.Timestamp)), Stacktrace: string(stJSON),
+					Context: string(ctxJSON), User: string(usrJSON), Tags: string(tagsJSON),
+					Status: "unresolved", CreatedAt: time.Now(),
 				}
-
+				if errorEvent.Level == "" {
+					errorEvent.Level = "error"
+				}
 				if err := InsertError(db, errorEvent); err != nil {
 					log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
 				} else {
 					log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
 				}
 			}
+
 		} else if itemHeader.Type == "event" {
 			var evt SentryEvent
 			if err := json.Unmarshal(payload, &evt); err != nil {
-				log.Printf("Failed to unmarshal event: %v", err)
+				log.Printf("[DSN Debug] Failed to unmarshal event: %v", err)
 				continue
 			}
 
-			// Extract message
-			message := ""
-			if msgStr, ok := evt.Message.(string); ok {
-				message = msgStr
-			} else if msgObj, ok := evt.Message.(map[string]interface{}); ok {
-				if formatted, ok := msgObj["formatted"].(string); ok {
-					message = formatted
-				} else if msg, ok := msgObj["message"].(string); ok {
-					message = msg
-				}
-			}
+			log.Printf("[DSN Debug] Processing error event: %s (ID: %s)", evt.EventID, evt.EventID)
+			log.Printf("[DSN Debug] Event Exceptions: %d", len(evt.Exception.Values))
 
-			// If no message, use exception value
-			if message == "" && len(evt.Exception.Values) > 0 {
-				message = evt.Exception.Values[0].Value
-				if evt.Exception.Values[0].Type != "" {
-					message = evt.Exception.Values[0].Type + ": " + message
-				}
-			}
-
-			// Extract stacktrace
+			message := extractSentryMessage(evt.Message, evt.Exception)
 			var stacktraceData map[string]interface{}
-			if len(evt.Exception.Values) > 0 && evt.Exception.Values[0].Stacktrace != nil {
+			if len(evt.Exception.Values) > 0 {
 				stacktraceData = evt.Exception.Values[0].Stacktrace
-			} else {
+			}
+			if stacktraceData == nil {
 				stacktraceData = make(map[string]interface{})
 			}
 
-			// Marshal JSON fields
-			stacktraceJSON, _ := json.Marshal(stacktraceData)
-			contextJSON, _ := json.Marshal(evt.Contexts)
-			userJSON, _ := json.Marshal(evt.User)
+			stJSON, _ := json.Marshal(stacktraceData)
+			ctxJSON, _ := json.Marshal(evt.Contexts)
+			usrJSON, _ := json.Marshal(evt.User)
 			tagsJSON, _ := json.Marshal(evt.Tags)
 
-			// Timestamp
 			var ts time.Time
 			if evt.Timestamp != nil {
 				ts = floatToTime(float64(*evt.Timestamp))
@@ -1038,24 +990,15 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			}
 
 			errorEvent := &ErrorEvent{
-				ID:          evt.EventID,
-				ProjectID:   projectID,
-				Message:     message,
-				Level:       evt.Level,
-				Environment: evt.Environment,
-				Release:     evt.Release,
-				Platform:    evt.Platform,
-				Timestamp:   ts,
-				Stacktrace:  string(stacktraceJSON),
-				Context:     string(contextJSON),
-				User:        string(userJSON),
-				Tags:        string(tagsJSON),
+				ID: evt.EventID, ProjectID: projectID, Message: message, Level: evt.Level,
+				Environment: evt.Environment, Release: evt.Release, Platform: evt.Platform,
+				Timestamp: ts, Stacktrace: string(stJSON), Context: string(ctxJSON),
+				User: string(usrJSON), Tags: string(tagsJSON),
+				Status: "unresolved", CreatedAt: time.Now(),
 			}
-
 			if errorEvent.Level == "" {
 				errorEvent.Level = "error"
 			}
-
 			if err := InsertError(db, errorEvent); err != nil {
 				log.Printf("[DSN Debug] Failed to insert error event: %v", err)
 			} else {
@@ -1072,6 +1015,56 @@ func floatToTime(ts float64) time.Time {
 	sec := int64(ts)
 	nsec := int64((ts - float64(sec)) * 1e9)
 	return time.Unix(sec, nsec)
+}
+
+// readEnvelopeLine reads a single line from a bytes.Reader
+func readEnvelopeLine(reader *bytes.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return line, err
+		}
+		if b == '\n' {
+			return line, nil
+		}
+		line = append(line, b)
+	}
+}
+
+// extractSentryMessage handles various message and exception formats to get a descriptive string
+func extractSentryMessage(msg interface{}, exception SentryExceptionWrapper) string {
+	message := ""
+
+	// 1. Try formatted message or direct string
+	if msgStr, ok := msg.(string); ok {
+		message = msgStr
+	} else if msgObj, ok := msg.(map[string]interface{}); ok {
+		if formatted, ok := msgObj["formatted"].(string); ok {
+			message = formatted
+		} else if m, ok := msgObj["message"].(string); ok {
+			message = m
+		}
+	}
+
+	// 2. If no message, try the first exception
+	if message == "" && len(exception.Values) > 0 {
+		ex := exception.Values[0]
+		message = ex.Value
+		if ex.Type != "" {
+			if message != "" {
+				message = ex.Type + ": " + message
+			} else {
+				message = ex.Type
+			}
+		}
+	}
+
+	if message == "" {
+		message = "Unknown error"
+	}
+
+	return message
 }
 
 // getProjectDiscovery returns project information for SDK discovery
