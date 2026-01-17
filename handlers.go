@@ -110,6 +110,18 @@ type SentryTransaction struct {
 	Spans          []SentrySpan  `json:"spans"`
 	StartTimestamp FlexTimestamp `json:"start_timestamp"`
 	Timestamp      FlexTimestamp `json:"timestamp"`
+
+	// Exception data (transactions can carry errors)
+	Exception   SentryExceptionWrapper `json:"exception"`
+	Level       string                 `json:"level"`
+	Message     interface{}            `json:"message"`
+	Environment string                 `json:"environment"`
+	Release     string                 `json:"release"`
+	Platform    string                 `json:"platform"`
+	User        map[string]interface{} `json:"user"`
+	Tags        map[string]interface{} `json:"tags"`
+	Extra       map[string]interface{} `json:"extra"`
+	SDK         map[string]interface{} `json:"sdk"`
 }
 
 type SentrySpan struct {
@@ -892,6 +904,81 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				} else {
 					log.Printf("[DSN Debug] Successfully stored child span %s (parent: %s) for trace %s",
 						childSpan.SpanID, childSpan.ParentSpanID, childSpan.TraceID)
+				}
+			}
+
+			// Check if transaction contains exception data (transactions can carry errors)
+			if len(tx.Exception.Values) > 0 {
+				log.Printf("[DSN Debug] Transaction contains exception data, storing as error event")
+
+				// Extract message
+				message := ""
+				if msgStr, ok := tx.Message.(string); ok {
+					message = msgStr
+				} else if msgObj, ok := tx.Message.(map[string]interface{}); ok {
+					if formatted, ok := msgObj["formatted"].(string); ok {
+						message = formatted
+					} else if msg, ok := msgObj["message"].(string); ok {
+						message = msg
+					}
+				}
+
+				// If no message, use exception value
+				if message == "" && len(tx.Exception.Values) > 0 {
+					message = tx.Exception.Values[0].Value
+					if tx.Exception.Values[0].Type != "" {
+						message = tx.Exception.Values[0].Type + ": " + message
+					}
+				}
+
+				// Extract stacktrace from exception
+				var stacktraceData map[string]interface{}
+				if len(tx.Exception.Values) > 0 && tx.Exception.Values[0].Stacktrace != nil {
+					stacktraceData = tx.Exception.Values[0].Stacktrace
+				} else {
+					stacktraceData = make(map[string]interface{})
+				}
+
+				// Build context from transaction data
+				contextData := make(map[string]interface{})
+				contextData["trace_id"] = tx.Contexts.Trace.TraceID
+				contextData["span_id"] = tx.Contexts.Trace.SpanID
+				if tx.Extra != nil {
+					contextData["extra"] = tx.Extra
+				}
+				if tx.SDK != nil {
+					contextData["sdk"] = tx.SDK
+				}
+
+				stacktraceJSON, _ := json.Marshal(stacktraceData)
+				contextJSON, _ := json.Marshal(contextData)
+				userJSON, _ := json.Marshal(tx.User)
+				tagsJSON, _ := json.Marshal(tx.Tags)
+
+				level := tx.Level
+				if level == "" {
+					level = "error"
+				}
+
+				errorEvent := &ErrorEvent{
+					ID:          tx.EventID,
+					ProjectID:   projectID,
+					Message:     message,
+					Level:       level,
+					Environment: tx.Environment,
+					Release:     tx.Release,
+					Platform:    tx.Platform,
+					Timestamp:   floatToTime(float64(tx.Timestamp)),
+					Stacktrace:  string(stacktraceJSON),
+					Context:     string(contextJSON),
+					User:        string(userJSON),
+					Tags:        string(tagsJSON),
+				}
+
+				if err := InsertError(db, errorEvent); err != nil {
+					log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
+				} else {
+					log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
 				}
 			}
 		}
