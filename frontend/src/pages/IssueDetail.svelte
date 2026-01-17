@@ -374,69 +374,6 @@
       <!-- Main Content -->
       <div class="lg:col-span-8 space-y-8">
         {#if activeTab === "details"}
-          <!-- Timeline View (Prominent) -->
-          <div
-            class="rounded-xl border border-white/10 bg-white/5 overflow-hidden shadow-2xl"
-          >
-            <div
-              class="flex items-center justify-between border-b border-white/10 bg-white/5 px-4 py-3"
-            >
-              <h2
-                class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400"
-              >
-                <Calendar size={14} class="text-pulse-400" />
-                <span>Event Timeline ({occurrences.length})</span>
-              </h2>
-              <div class="text-[10px] text-slate-500 font-medium">
-                Showing last 50 occurrences
-              </div>
-            </div>
-            <div class="p-6">
-              <div class="relative border-l border-white/10 pl-6 space-y-6">
-                {#each occurrences.length > 0 ? occurrences : [error] as occurrence, i}
-                  <div class="relative group">
-                    <div
-                      class="absolute -left-[29.5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 {i ===
-                      0
-                        ? 'border-pulse-500 bg-pulse-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]'
-                        : 'border-slate-600 bg-black'} transition-all group-hover:scale-125"
-                    ></div>
-                    <div class="flex items-center justify-between">
-                      <div class="text-xs font-bold text-white">
-                        {formatDate(
-                          occurrence.timestamp || occurrence.created_at,
-                        )}
-                      </div>
-                      <div
-                        class="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[9px] font-mono text-slate-400"
-                      >
-                        {occurrence.id.substring(0, 8)}
-                      </div>
-                    </div>
-                    <div class="mt-1 text-xs text-slate-500">
-                      {#if i === occurrences.length - 1 && occurrences.length > 1}
-                        Issue first tracked in
-                      {:else if i === 0}
-                        Latest occurrence in
-                      {:else}
-                        Occurrence detected in
-                      {/if}
-                      <span class="text-pulse-400 font-semibold"
-                        >{occurrence.environment || "production"}</span
-                      >
-                      environment.
-                      {#if occurrence.release}
-                        <span class="ml-2 text-slate-600 font-mono text-[10px]"
-                          >Release: {occurrence.release}</span
-                        >
-                      {/if}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          </div>
-
           <!-- Stack Trace -->
           <div
             class="rounded-xl border border-white/10 bg-black/40 overflow-hidden"
@@ -939,14 +876,67 @@
             {/if}
           </div>
         {:else if activeTab === "events"}
-          <div class="py-20 text-center">
-            <Activity
-              size={48}
-              class="mx-auto text-slate-600 mb-4 opacity-20"
-            />
-            <p class="text-slate-500">
-              Detailed event history moved to the main details tab.
-            </p>
+          <!-- Event Timeline -->
+          <div
+            class="rounded-xl border border-white/10 bg-white/5 overflow-hidden shadow-2xl"
+          >
+            <div
+              class="flex items-center justify-between border-b border-white/10 bg-white/5 px-4 py-3"
+            >
+              <h2
+                class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400"
+              >
+                <Calendar size={14} class="text-pulse-400" />
+                <span>Event Timeline ({occurrences.length})</span>
+              </h2>
+              <div class="text-[10px] text-slate-500 font-medium">
+                Showing last 50 occurrences
+              </div>
+            </div>
+            <div class="p-6">
+              <div class="relative border-l border-white/10 pl-6 space-y-6">
+                {#each occurrences.length > 0 ? occurrences : [error] as occurrence, i}
+                  <div class="relative group">
+                    <div
+                      class="absolute -left-[29.5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 {i ===
+                      0
+                        ? 'border-pulse-500 bg-pulse-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]'
+                        : 'border-slate-600 bg-black'} transition-all group-hover:scale-125"
+                    ></div>
+                    <div class="flex items-center justify-between">
+                      <div class="text-xs font-bold text-white">
+                        {formatDate(
+                          occurrence.timestamp || occurrence.created_at,
+                        )}
+                      </div>
+                      <div
+                        class="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[9px] font-mono text-slate-400"
+                      >
+                        {occurrence.id.substring(0, 8)}
+                      </div>
+                    </div>
+                    <div class="mt-1 text-xs text-slate-500">
+                      {#if i === occurrences.length - 1 && occurrences.length > 1}
+                        Issue first tracked in
+                      {:else if i === 0}
+                        Latest occurrence in
+                      {:else}
+                        Occurrence detected in
+                      {/if}
+                      <span class="text-pulse-400 font-semibold"
+                        >{occurrence.environment || "production"}</span
+                      >
+                      environment.
+                      {#if occurrence.release}
+                        <span class="ml-2 text-slate-600 font-mono text-[10px]"
+                          >Release: {occurrence.release}</span
+                        >
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
           </div>
         {/if}
       </div>
