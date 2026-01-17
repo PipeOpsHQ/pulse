@@ -16,7 +16,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 # Copy static files from frontend build
-COPY --from=frontend-builder /app/frontend/public ./frontend/public
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # Build the binary with SQLite support (requires CGO)
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o pulse .
 
@@ -30,7 +30,7 @@ WORKDIR /root/
 # Copy binary from builder
 COPY --from=backend-builder /app/pulse .
 # Copy static files from builder (for server to serve)
-COPY --from=backend-builder /app/frontend/public ./frontend/public
+COPY --from=backend-builder /app/frontend/dist ./frontend/dist
 # Create data directory for SQLite
 RUN mkdir -p /root/data
 
