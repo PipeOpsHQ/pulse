@@ -988,7 +988,6 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
 				}
 			}
-		}
 		} else if itemHeader.Type == "event" {
 			var evt SentryEvent
 			if err := json.Unmarshal(payload, &evt); err != nil {
