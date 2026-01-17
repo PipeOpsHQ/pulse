@@ -119,24 +119,28 @@
     loadIssues(0);
   }
 
-  $: filteredIssues = searchQuery
-    ? (issues || []).filter(issue =>
-        issue.message?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        issue.projectName?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : (issues || []);
-
-  $: {
+  $: filteredIssues = (() => {
+    // First filter
+    let filtered = searchQuery
+      ? (issues || []).filter(issue =>
+          issue.message?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          issue.projectName?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : (issues || []);
+    
+    // Then sort (create new array, don't mutate)
+    const sorted = [...filtered];
     if (sortBy === 'events') {
-      filteredIssues.sort((a, b) => b.eventCount - a.eventCount);
+      sorted.sort((a, b) => b.eventCount - a.eventCount);
     } else if (sortBy === 'users') {
-      filteredIssues.sort((a, b) => b.userCount - a.userCount);
+      sorted.sort((a, b) => b.userCount - a.userCount);
     } else if (sortBy === 'firstSeen') {
-      filteredIssues.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     } else {
-      filteredIssues.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
-  }
+    return sorted;
+  })();
 
   function getLevelColorClass(level) {
     const colors = getErrorLevelColor(level);
