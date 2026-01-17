@@ -655,6 +655,33 @@ func GetErrorWithStats(db *sql.DB, id string) (map[string]interface{}, error) {
 	}, nil
 }
 
+func GetErrorOccurrences(db *sql.DB, message, projectID string, limit int) ([]ErrorEvent, error) {
+	rows, err := db.Query(
+		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, created_at
+		 FROM errors WHERE message = ? AND project_id = ? ORDER BY created_at DESC LIMIT ?`,
+		message, projectID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var occurrences []ErrorEvent
+	for rows.Next() {
+		var e ErrorEvent
+		err := rows.Scan(
+			&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+			&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+			&e.User, &e.Tags, &e.Status, &e.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		occurrences = append(occurrences, e)
+	}
+	return occurrences, nil
+}
+
 func DeleteError(db *sql.DB, id string) error {
 	_, err := db.Exec("DELETE FROM errors WHERE id = ?", id)
 	return err

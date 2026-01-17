@@ -223,6 +223,9 @@ func main() {
 	api.HandleFunc("/errors/{id}", func(w http.ResponseWriter, r *http.Request) {
 		getError(w, r, db)
 	}).Methods("GET", "OPTIONS")
+	api.HandleFunc("/errors/{id}/occurrences", func(w http.ResponseWriter, r *http.Request) {
+		getErrorOccurrences(w, r, db)
+	}).Methods("GET", "OPTIONS")
 
 	api.HandleFunc("/errors/{id}", func(w http.ResponseWriter, r *http.Request) {
 		deleteError(w, r, db)

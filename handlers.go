@@ -217,7 +217,7 @@ func storeError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	// Get project by API key
+	// Get project (for notifications and count)
 	project, err := GetProjectByAPIKey(db, apiKey)
 	if err != nil {
 		http.Error(w, "Invalid API key", http.StatusUnauthorized)
@@ -239,12 +239,6 @@ func storeError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	timestamp := time.Now()
 	if req.Timestamp != nil {
 		timestamp = *req.Timestamp
-	}
-
-	// Quota check
-	if project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth {
-		http.Error(w, "Monthly event quota exceeded", http.StatusTooManyRequests)
-		return
 	}
 
 	event := &ErrorEvent{
@@ -431,6 +425,27 @@ func getError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	json.NewEncoder(w).Encode(errorEvent)
 }
 
+func getErrorOccurrences(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	// First get the error to get the message and project_id for grouping
+	errorEvent, err := GetError(db, id)
+	if err != nil {
+		http.Error(w, "Error not found", http.StatusNotFound)
+		return
+	}
+
+	occurrences, err := GetErrorOccurrences(db, errorEvent.Message, errorEvent.ProjectID, 50)
+	if err != nil {
+		http.Error(w, "Failed to fetch occurrences", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(occurrences)
+}
+
 // storeErrorSentry handles Sentry-compatible event ingestion at /api/{project_id}/store/
 func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	vars := mux.Vars(r)
@@ -531,15 +546,6 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 
 		log.Printf("[DSN Debug] Processing transaction %s for project %s", tx.Transaction, projectID)
-
-		// Quota check for transactions
-		project, err := GetProject(db, projectID)
-		if err == nil {
-			if project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth {
-				http.Error(w, "Monthly event quota exceeded", http.StatusTooManyRequests)
-				return
-			}
-		}
 
 		// Convert root transaction to Span
 		startTime := time.Now()
@@ -698,18 +704,8 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		level = "error"
 	}
 
-	// Get project for quota check
-	project, err := GetProject(db, projectID)
-	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
-		return
-	}
-
-	// Quota check
-	if project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth {
-		http.Error(w, "Monthly event quota exceeded", http.StatusTooManyRequests)
-		return
-	}
+	// Get project for notifications
+	project, _ := GetProject(db, projectID)
 
 	event := &ErrorEvent{
 		ID:          eventID,
@@ -828,14 +824,6 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Parse Envelope (properly using length headers)
 	reader := bytes.NewReader(body)
 
-	// Get project for quota check early
-	project, err := GetProject(db, projectID)
-	if err != nil {
-		http.Error(w, "Project not found", http.StatusNotFound)
-		return
-	}
-	hasQuota := project.MaxEventsPerMonth > 0 && project.CurrentMonthEvents >= project.MaxEventsPerMonth
-
 	// Read Envelope Header (first line)
 	headerLine, err := readEnvelopeLine(reader)
 	if err != nil {
@@ -880,11 +868,6 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			var tx SentryTransaction
 			if err := json.Unmarshal(payload, &tx); err != nil {
 				log.Printf("[DSN Debug] Failed to unmarshal transaction: %v", err)
-				continue
-			}
-
-			if hasQuota {
-				log.Printf("[DSN Debug] Quota exceeded for project %s skipping transaction", projectID)
 				continue
 			}
 
@@ -984,11 +967,6 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			var evt SentryEvent
 			if err := json.Unmarshal(payload, &evt); err != nil {
 				log.Printf("[DSN Debug] Failed to unmarshal event: %v", err)
-				continue
-			}
-
-			if hasQuota {
-				log.Printf("[DSN Debug] Quota exceeded for project %s skipping error event", projectID)
 				continue
 			}
 

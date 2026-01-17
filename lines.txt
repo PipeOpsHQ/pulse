@@ -1,0 +1,61 @@
+442:  {#if loading}
+448:  {:else if project}
+520:              {#if showDSN}<EyeOff size={16} />{:else}<Eye size={16} />{/if}
+632:                      {:else}
+634:                      {/if}
+640:                      {#if showDSN}<EyeOff size={16} />{:else}<Eye
+642:                        />{/if}
+737:        {:else}
+769:                      {:else}
+771:                      {/if}
+777:                      {#if showDSN}<EyeOff size={16} />{:else}<Eye
+779:                        />{/if}
+819:                {:else}
+851:                {/if}
+855:        {/if}
+899:                    {#if showApiKey}{project.api_key}{:else}••••••••••••••••••••••••{/if}
+905:                    {#if showApiKey}<EyeOff size={14} />{:else}<Eye
+907:                      />{/if}
+996:              {/if}
+1017:                    {/if}
+1084:                  {/if}
+1086:              {/if}
+1116:    {/if}
+1163:            {:else}
+1192:                        {/if}
+1201:                    {/if}
+1282:            {/if}
+1286:    {/if}
+1310:        {:else}
+1345:                      {/if}
+1358:        {/if}
+1360:    {/if}
+1396:          {#if loadingTraces}
+1416:          {:else}
+1471:          {/if}
+1474:    {/if}
+1509:              {/if}
+1551:          {/if}
+1553:          {#if loadingMonitors}
+1580:          {:else}
+1601:                          {:else}
+1603:                          {/if}
+1676:                        {:else}
+1678:                        {/if}
+1694:                  {/if}
+1698:          {/if}
+1701:    {/if}
+1702:  {:else}
+1709:  {/if}
+1759:          {#if loadingDetails}
+1788:          {:else}
+1841:          {/if}
+1853:  {/if}
+1913:          {#if loadingTraceDetails}
+1919:          {:else}
+1958:                    {/if}
+1987:                {/if}
+2000:          {/if}
+2004:  {/if}
+2082:              {/if}
+2148:  {/if}

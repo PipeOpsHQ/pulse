@@ -40,6 +40,7 @@
   let stackTraceView = "frames"; // 'raw', 'frames', 'code', 'tree'
   let expandedFrames = new Set();
   let showFullStacktrace = false;
+  let occurrences = [];
 
   function toggleFrame(index) {
     if (expandedFrames.has(index)) {
@@ -108,6 +109,13 @@
           tags = error.tags ? JSON.parse(error.tags) : {};
         } catch (e) {
           tags = {};
+        }
+
+        try {
+          occurrences = await api.get(`/errors/${errorId}/occurrences`);
+        } catch (e) {
+          console.error("Failed to load occurrences:", e);
+          occurrences = [error]; // fallback to the main error if fetch fails
         }
       }
     } catch (err) {
@@ -881,19 +889,37 @@
             </div>
             <div class="p-6">
               <div class="relative border-l border-white/10 pl-6 space-y-8">
-                <div class="relative">
-                  <div
-                    class="absolute -left-[29px] top-1 h-3 w-3 rounded-full border-2 border-pulse-500 bg-black"
-                  ></div>
-                  <div class="text-xs font-bold text-white">
-                    {formatDate(error.created_at)}
+                {#each occurrences as occurrence, i}
+                  <div class="relative">
+                    <div
+                      class="absolute -left-[29px] top-1 h-3 w-3 rounded-full border-2 {i ===
+                      0
+                        ? 'border-pulse-500'
+                        : 'border-slate-600'} bg-black"
+                    ></div>
+                    <div class="text-xs font-bold text-white">
+                      {formatDate(
+                        occurrence.timestamp || occurrence.created_at,
+                      )}
+                    </div>
+                    <div class="mt-1 text-xs text-slate-500">
+                      {#if i === occurrences.length - 1}
+                        Issue first tracked in
+                      {:else}
+                        Occurrence detected in
+                      {/if}
+                      <span class="text-pulse-400"
+                        >{occurrence.environment || "production"}</span
+                      >
+                      environment.
+                      {#if occurrence.release}
+                        <span class="ml-2 text-slate-600 font-mono text-[10px]"
+                          >Release: {occurrence.release}</span
+                        >
+                      {/if}
+                    </div>
                   </div>
-                  <div class="mt-1 text-xs text-slate-500">
-                    Issue first tracked in <span class="text-pulse-400"
-                      >{error.environment || "production"}</span
-                    > environment.
-                  </div>
-                </div>
+                {/each}
               </div>
             </div>
           </div>
