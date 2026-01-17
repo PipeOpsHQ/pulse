@@ -824,6 +824,9 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Parse Envelope (properly using length headers)
 	reader := bytes.NewReader(body)
 
+	// Get project for notifications
+	project, _ := GetProject(db, projectID)
+
 	// Read Envelope Header (first line)
 	headerLine, err := readEnvelopeLine(reader)
 	if err != nil {
@@ -960,6 +963,8 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
 				} else {
 					log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
+					IncrementProjectEventCount(db, projectID)
+					triggerNotifications(db, project, errorEvent)
 				}
 			}
 
@@ -1008,6 +1013,8 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				log.Printf("[DSN Debug] Failed to insert error event: %v", err)
 			} else {
 				log.Printf("[DSN Debug] Successfully stored error event %s", evt.EventID)
+				IncrementProjectEventCount(db, projectID)
+				triggerNotifications(db, project, errorEvent)
 			}
 		}
 	}
