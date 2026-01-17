@@ -47,6 +47,10 @@
   let refreshInterval = null;
   let monitors = [];
   let loadingMonitors = false;
+  let traceQuery = "";
+  let loadingMoreTraces = false;
+  let hasMoreTraces = true;
+  let traceLimit = 50;
   let showMonitorModal = false;
   let selectedMonitor = null;
   let newMonitor = {
@@ -183,17 +187,56 @@
     window.history.pushState({}, "", url);
   }
 
-  async function loadTraces() {
+  async function loadTraces(loadMore = false) {
     setActiveTab("traces");
-    if (traces.length > 0) return;
-    loadingTraces = true;
+
+    if (!loadMore) {
+      loadingTraces = true;
+      traces = [];
+      hasMoreTraces = true;
+    } else {
+      loadingMoreTraces = true;
+    }
+
     try {
-      const res = await api.get(`/projects/${project.id}/traces`);
-      traces = res || [];
+      const offset = loadMore ? traces.length : 0;
+      const res = await api.get(
+        `/projects/${projectId}/traces?limit=${traceLimit}&offset=${offset}&query=${encodeURIComponent(traceQuery)}`,
+      );
+      const newTraces = res || [];
+
+      if (loadMore) {
+        traces = [...traces, ...newTraces];
+      } else {
+        traces = newTraces;
+      }
+
+      if (newTraces.length < traceLimit) {
+        hasMoreTraces = false;
+      }
     } catch (err) {
       toast.fromHttpError(err);
     } finally {
       loadingTraces = false;
+      loadingMoreTraces = false;
+    }
+  }
+
+  function handleTraceSearch(e) {
+    if (e.key === "Enter") {
+      loadTraces();
+    }
+  }
+
+  function handleTracesScroll(e) {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    if (
+      scrollHeight - scrollTop <= clientHeight + 100 &&
+      !loadingMoreTraces &&
+      hasMoreTraces &&
+      !loadingTraces
+    ) {
+      loadTraces(true);
     }
   }
 
@@ -336,6 +379,22 @@
     });
 
     return roots;
+  }
+
+  function flattenSpanTree(roots, level = 0) {
+    let result = [];
+    roots.sort(
+      (a, b) =>
+        new Date(a.start_timestamp).getTime() -
+        new Date(b.start_timestamp).getTime(),
+    );
+    roots.forEach((node) => {
+      result.push({ ...node, level });
+      if (node.children && node.children.length > 0) {
+        result = [...result, ...flattenSpanTree(node.children, level + 1)];
+      }
+    });
+    return result;
   }
 
   function getStatusColor(status) {
@@ -1382,14 +1441,36 @@ Sentry.init({
                 </p>
               </div>
             </div>
+            <div class="flex items-center gap-3 flex-1 max-w-md ml-6">
+              <div class="relative w-full">
+                <div
+                  class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+                >
+                  <Search size={14} class="text-slate-500" />
+                </div>
+                <input
+                  type="text"
+                  bind:value={traceQuery}
+                  on:keydown={handleTraceSearch}
+                  placeholder="Search traces (name, op)..."
+                  class="block w-full pl-9 pr-3 py-1.5 border border-white/10 rounded-lg bg-black/20 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all"
+                />
+              </div>
+              <button
+                on:click={() => loadTraces()}
+                class="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors"
+              >
+                Search
+              </button>
+            </div>
             <button
               on:click={() => {
-                traces = [];
+                traceQuery = "";
                 loadTraces();
               }}
               class="text-xs font-bold text-pulse-400 hover:text-white transition-colors"
             >
-              Refresh
+              Reset
             </button>
           </div>
 
@@ -1414,9 +1495,12 @@ Sentry.init({
               </p>
             </div>
           {:else}
-            <div class="overflow-x-auto">
-              <table class="w-full text-left">
-                <thead>
+            <div
+              class="max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10"
+              on:scroll={handleTracesScroll}
+            >
+              <table class="w-full text-left border-collapse">
+                <thead class="sticky top-0 bg-[#0a0a0b] z-10">
                   <tr
                     class="border-b border-white/5 text-[10px] font-bold uppercase tracking-wider text-slate-500"
                   >
@@ -1919,10 +2003,16 @@ Sentry.init({
           {:else}
             <!-- Timeline Visualization -->
             <div class="space-y-0.5 border-l border-white/5 ml-2">
-              {#snippet renderSpan(span, level, totalDuration, traceStartTime)}
+              {#each flattenSpanTree(buildSpanTree(traceSpans)) as span}
                 {@const duration =
                   new Date(span.timestamp).getTime() -
                   new Date(span.start_timestamp).getTime()}
+                {@const traceStartTime = new Date(
+                  selectedTrace.start_timestamp,
+                ).getTime()}
+                {@const totalDuration =
+                  new Date(selectedTrace.timestamp).getTime() -
+                    traceStartTime || 1}
                 {@const startOffset =
                   new Date(span.start_timestamp).getTime() - traceStartTime}
                 {@const widthPercent = Math.max(
@@ -1933,7 +2023,7 @@ Sentry.init({
 
                 <div
                   class="group relative flex items-center gap-4 rounded p-1 hover:bg-white/5 transition-colors"
-                  style="margin-left: {level * 12}px"
+                  style="margin-left: {span.level * 12}px"
                 >
                   <div
                     class="w-1/3 min-w-[200px] text-[11px] flex items-center gap-2"
@@ -1975,26 +2065,6 @@ Sentry.init({
                     </span>
                   </div>
                 </div>
-                {#if span.children && span.children.length > 0}
-                  {#each span.children as child}
-                    {@render renderSpan(
-                      child,
-                      level + 1,
-                      totalDuration,
-                      traceStartTime,
-                    )}
-                  {/each}
-                {/if}
-              {/snippet}
-
-              {#each buildSpanTree(traceSpans) as root}
-                {@render renderSpan(
-                  root,
-                  0,
-                  new Date(selectedTrace.timestamp).getTime() -
-                    new Date(selectedTrace.start_timestamp).getTime() || 1,
-                  new Date(selectedTrace.start_timestamp).getTime(),
-                )}
               {/each}
             </div>
           {/if}

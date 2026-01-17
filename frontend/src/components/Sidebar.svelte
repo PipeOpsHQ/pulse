@@ -126,6 +126,19 @@
       </Link>
 
       <Link
+        to="/traces"
+        class="group flex items-center rounded-lg px-3 py-2.5 transition-colors {currentPath ===
+        '/traces'
+          ? 'bg-pulse-500/10 text-pulse-400'
+          : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
+      >
+        <Activity size={20} class="shrink-0" />
+        {#if !$sidebarCollapsed}
+          <span class="ml-3 text-sm font-medium">Traces</span>
+        {/if}
+      </Link>
+
+      <Link
         to="/projects"
         class="group flex items-center rounded-lg px-3 py-2.5 transition-colors {currentPath ===
         '/projects'

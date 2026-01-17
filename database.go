@@ -916,13 +916,25 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 	return stats, nil
 }
 
-func GetProjectRootSpans(db *sql.DB, projectID string, limit int) ([]TraceSpan, error) {
-	rows, err := db.Query(`
+func GetProjectRootSpans(db *sql.DB, projectID string, query string, limit, offset int) ([]TraceSpan, error) {
+	sqlQuery := `
 		SELECT id, project_id, trace_id, span_id, parent_span_id,
 		       name, op, description, start_timestamp, timestamp, status, data
 		FROM spans
-		WHERE project_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')
-		ORDER BY start_timestamp DESC LIMIT ?`, projectID, limit)
+		WHERE project_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')`
+
+	args := []interface{}{projectID}
+
+	if query != "" {
+		sqlQuery += " AND (name LIKE ? OR op LIKE ? OR description LIKE ?)"
+		q := "%" + query + "%"
+		args = append(args, q, q, q)
+	}
+
+	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1406,4 +1418,43 @@ func GetSystemStats(db *sql.DB) (SystemStats, error) {
 	}
 
 	return stats, nil
+}
+
+func GetAllRootSpans(db *sql.DB, query string, limit, offset int) ([]TraceSpan, error) {
+	sqlQuery := `
+		SELECT id, project_id, trace_id, span_id, parent_span_id,
+		       name, op, description, start_timestamp, timestamp, status, data
+		FROM spans
+		WHERE (parent_span_id IS NULL OR parent_span_id = '')`
+	
+	args := []interface{}{}
+	
+	if query != "" {
+		sqlQuery += " AND (name LIKE ? OR op LIKE ? OR description LIKE ?)"
+		q := "%" + query + "%"
+		args = append(args, q, q, q)
+	}
+	
+	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		err := rows.Scan(
+&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
+			&s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data,
+		)
+		if err != nil {
+			return nil, err
+		}
+		spans = append(spans, s)
+	}
+	return spans, nil
 }

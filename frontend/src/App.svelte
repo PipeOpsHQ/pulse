@@ -11,6 +11,7 @@
   import Login from "./pages/Login.svelte";
   import SecurityVault from "./pages/SecurityVault.svelte";
   import Traces from "./pages/Traces.svelte";
+  import AllTraces from "./pages/AllTraces.svelte";
   import TraceDetail from "./pages/TraceDetail.svelte";
   import StatusPage from "./pages/StatusPage.svelte";
   import Insights from "./pages/Insights.svelte";
@@ -135,6 +136,8 @@
             <SecurityVault />
           {:else if currentPath === "/admin"}
             <Admin />
+          {:else if currentPath === "/traces"}
+            <AllTraces />
           {:else if currentPath.startsWith("/errors/")}
             <IssueDetail />
           {:else if currentPath.startsWith("/projects/")}

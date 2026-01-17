@@ -754,7 +754,16 @@ func getProjectTraces(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 
-	spans, err := GetProjectRootSpans(db, projectID, limit)
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil {
+			offset = parsed
+		}
+	}
+
+	query := r.URL.Query().Get("query")
+
+	spans, err := GetProjectRootSpans(db, projectID, query, limit, offset)
 	if err != nil {
 		http.Error(w, "Failed to fetch traces", http.StatusInternalServerError)
 		return
@@ -1966,7 +1975,7 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Traces/Performance Stats
 	traceStats := map[string]interface{}{}
 	if projectID != "" {
-		spans, _ := GetProjectRootSpans(db, projectID, 1000)
+		spans, _ := GetProjectRootSpans(db, projectID, "", 1000, 0)
 		traceStats["total_traces"] = len(spans)
 
 		// Calculate average duration
@@ -1999,7 +2008,7 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		var allSpans []TraceSpan
 		projects, _ := GetAllProjects(db)
 		for _, p := range projects {
-			spans, _ := GetProjectRootSpans(db, p.ID, 100)
+			spans, _ := GetProjectRootSpans(db, p.ID, "", 100, 0)
 			allSpans = append(allSpans, spans...)
 		}
 		traceStats["total_traces"] = len(allSpans)
@@ -2335,4 +2344,31 @@ func getSystemStats(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+func getAllTraces(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil {
+			limit = parsed
+		}
+	}
+
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil {
+			offset = parsed
+		}
+	}
+
+	query := r.URL.Query().Get("query")
+
+	spans, err := GetAllRootSpans(db, query, limit, offset)
+	if err != nil {
+		http.Error(w, "Failed to fetch traces", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(spans)
 }

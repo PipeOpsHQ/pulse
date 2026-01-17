@@ -220,6 +220,11 @@ func main() {
 		getTraceDetails(w, r, db)
 	}).Methods("GET", "OPTIONS")
 
+	// Global traces endpoint
+	api.HandleFunc("/traces", func(w http.ResponseWriter, r *http.Request) {
+		getAllTraces(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
 	api.HandleFunc("/errors/{id}", func(w http.ResponseWriter, r *http.Request) {
 		getError(w, r, db)
 	}).Methods("GET", "OPTIONS")
