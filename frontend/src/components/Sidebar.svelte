@@ -17,6 +17,7 @@
     Lock,
     BarChart3,
     Shield,
+    Route,
   } from "lucide-svelte";
 
   export let currentPath = "";
@@ -132,7 +133,7 @@
           ? 'bg-pulse-500/10 text-pulse-400'
           : 'text-slate-400 hover:bg-white/5 hover:text-white'}"
       >
-        <Activity size={20} class="shrink-0" />
+        <Route size={20} class="shrink-0" />
         {#if !$sidebarCollapsed}
           <span class="ml-3 text-sm font-medium">Traces</span>
         {/if}
