@@ -18,7 +18,7 @@
   } from "lucide-svelte";
   import { api } from "../lib/api";
   import { toast } from "../stores/toast";
-  import { ensureHttps } from "../lib/utils";
+  import { ensureHttps } from "../lib/utils.js";
 
   let sections = [
     { id: "profile", label: "Profile", icon: User },

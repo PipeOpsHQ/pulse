@@ -133,6 +133,23 @@ func main() {
 		handleEnvelopeSentry(w, r, db)
 	}).Methods("POST", "OPTIONS")
 
+	// Root-level aliases for SDKs that might omit /api (if configured that way)
+	r.HandleFunc("/{projectId}/store/", func(w http.ResponseWriter, r *http.Request) {
+		storeErrorSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+	r.HandleFunc("/{projectId}/store", func(w http.ResponseWriter, r *http.Request) {
+		storeErrorSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+	r.HandleFunc("/{projectId}/envelope/", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvelopeSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+	r.HandleFunc("/{projectId}/envelope", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvelopeSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+	r.HandleFunc("/{projectId}/", func(w http.ResponseWriter, r *http.Request) {
+		getProjectDiscovery(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
 	// Trace retrieval
 	api.HandleFunc("/projects/{projectId}/traces", func(w http.ResponseWriter, r *http.Request) {
 		getProjectTraces(w, r, db)

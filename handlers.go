@@ -808,7 +808,11 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				rootSpan.Op = "transaction"
 			}
 
-			InsertSpan(db, rootSpan)
+			if err := InsertSpan(db, rootSpan); err != nil {
+				log.Printf("[DSN Debug] Failed to insert root span for project %s: %v", projectID, err)
+			} else {
+				log.Printf("[DSN Debug] Successfully stored root span for project %s (Trace ID: %s)", projectID, rootSpan.TraceID)
+			}
 
 			// Process child spans
 			for _, s := range tx.Spans {
@@ -832,7 +836,9 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					childSpan.TraceID = tx.Contexts.Trace.TraceID
 				}
 
-				InsertSpan(db, childSpan)
+				if err := InsertSpan(db, childSpan); err != nil {
+					log.Printf("[DSN Debug] Failed to insert child span for project %s: %v", projectID, err)
+				}
 			}
 		}
 		// Future: Handle 'event' type here as well for unified ingestion
