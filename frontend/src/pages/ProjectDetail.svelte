@@ -4,6 +4,7 @@
   import Link from "../components/Link.svelte";
   import { api } from "../lib/api";
   import { toast } from "../stores/toast";
+  import { ensureHttps } from "../lib/utils";
   import {
     getErrorLevelColor,
     getMonitorStatusColor,
@@ -237,7 +238,7 @@
         await api.put(`/projects/${projectId}/monitors/${selectedMonitor.id}`, {
           name: newMonitor.name,
           type: newMonitor.type,
-          url: newMonitor.url,
+          url: ensureHttps(newMonitor.url),
           interval: newMonitor.interval,
           timeout: newMonitor.timeout,
         });
@@ -247,7 +248,7 @@
         await api.post(`/projects/${projectId}/monitors`, {
           name: newMonitor.name,
           type: newMonitor.type,
-          url: newMonitor.url,
+          url: ensureHttps(newMonitor.url),
           interval: newMonitor.interval,
           timeout: newMonitor.timeout,
         });
