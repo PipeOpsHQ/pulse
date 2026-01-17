@@ -4,8 +4,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
@@ -23,6 +27,27 @@ func main() {
 		log.Println("No .env file found or error loading it, using system environment variables")
 	}
 
+	// Initialize Sentry
+	if dsn := os.Getenv("SENTRY_DSN"); dsn != "" {
+		err := sentry.Init(sentry.ClientOptions{
+			Dsn:              dsn,
+			Environment:      getEnvOrDefault("SENTRY_ENVIRONMENT", "development"),
+			TracesSampleRate: getFloatEnvOrDefault("SENTRY_TRACES_SAMPLE_RATE", 1.0),
+			BeforeSend: func(event *sentry.Event, hint *sentry.EventHint) *sentry.Event {
+				// Add custom filtering or modification here if needed
+				return event
+			},
+		})
+		if err != nil {
+			log.Printf("Sentry initialization failed: %v", err)
+		} else {
+			log.Println("Sentry initialized successfully")
+			defer sentry.Flush(2 * time.Second)
+		}
+	} else {
+		log.Println("Sentry DSN not configured, skipping initialization")
+	}
+
 	db, err := InitDB()
 	if err != nil {
 		log.Fatal("Failed to initialize database:", err)
@@ -30,6 +55,12 @@ func main() {
 	defer db.Close()
 
 	r := mux.NewRouter()
+
+	// Sentry middleware for request tracking
+	sentryMiddleware := sentryhttp.New(sentryhttp.Options{
+		Repanic: true,
+	})
+	r.Use(sentryMiddleware.Handle)
 
 	// CORS middleware
 	r.Use(corsMiddleware)
@@ -304,4 +335,22 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// getEnvOrDefault returns the environment variable value or a default
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getFloatEnvOrDefault returns the environment variable as float64 or a default
+func getFloatEnvOrDefault(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

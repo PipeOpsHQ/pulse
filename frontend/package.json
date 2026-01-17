@@ -18,6 +18,8 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
+    "@sentry/svelte": "^8.45.0",
+    "@sentry/vite-plugin": "^2.22.8",
     "svelte-routing": "^1.7.0"
   }
 }
