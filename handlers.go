@@ -1219,7 +1219,11 @@ func rotateProjectAPIKey(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	newKey, err := RotateAPIKey(db, projectID)
 	if err != nil {
-		http.Error(w, "Failed to rotate API key", http.StatusInternalServerError)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Project not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to rotate API key", http.StatusInternalServerError)
+		}
 		return
 	}
 

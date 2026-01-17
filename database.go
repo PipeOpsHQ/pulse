@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,7 +73,26 @@ type Monitor struct {
 
 // Database initialization
 func InitDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "./sentry.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./data/sentry.db"
+	}
+
+	// Ensure data directory exists
+	dataDir := "./data"
+	if dbPath != "./data/sentry.db" {
+		// If custom path, try to use its directory
+		lastSlash := strings.LastIndex(dbPath, "/")
+		if lastSlash != -1 {
+			dataDir = dbPath[:lastSlash]
+		}
+	}
+
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		_ = os.MkdirAll(dataDir, 0755)
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
 	}

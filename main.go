@@ -124,6 +124,15 @@ func main() {
 		handleEnvelopeSentry(w, r, db)
 	}).Methods("POST", "OPTIONS")
 
+	// Compatibility aliases for legacy/test paths
+	api.HandleFunc("/projects/{projectId}/envelope", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvelopeSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+
+	api.HandleFunc("/projects/{projectId}/envelope/", func(w http.ResponseWriter, r *http.Request) {
+		handleEnvelopeSentry(w, r, db)
+	}).Methods("POST", "OPTIONS")
+
 	// Trace retrieval
 	api.HandleFunc("/projects/{projectId}/traces", func(w http.ResponseWriter, r *http.Request) {
 		getProjectTraces(w, r, db)
