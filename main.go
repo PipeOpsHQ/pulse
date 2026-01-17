@@ -116,11 +116,11 @@ func main() {
 	}).Methods("GET", "OPTIONS")
 
 	// Sentry Envelope Endpoint
-	api.HandleFunc("/projects/{projectId}/envelope", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("/{projectId}/envelope/", func(w http.ResponseWriter, r *http.Request) {
 		handleEnvelopeSentry(w, r, db)
 	}).Methods("POST", "OPTIONS")
 
-	api.HandleFunc("/api/{projectId}/envelope", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("/{projectId}/envelope", func(w http.ResponseWriter, r *http.Request) {
 		handleEnvelopeSentry(w, r, db)
 	}).Methods("POST", "OPTIONS")
 
