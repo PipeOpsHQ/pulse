@@ -403,7 +403,8 @@
                   )}
                   {@const successHeight = (successEvents / maxEvents) * 100}
                   {@const errorHeight = (errorEvents / maxEvents) * 100}
-                  {@const hourPart = stat.Hour.split(" ")[1].substring(0, 5)}
+                  {@const hourPart =
+                    (stat.hour || "").split(" ")[1]?.substring(0, 5) || "--:--"}
 
                   <div
                     class="group relative flex-1 min-w-[20px] flex flex-col justify-end gap-1 hover:z-10"
@@ -428,7 +429,7 @@
                       class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900/95 border border-white/10 rounded text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-2xl"
                     >
                       <div class="font-bold mb-1 border-b border-white/10 pb-1">
-                        {stat.Hour}
+                        {stat.hour}
                       </div>
                       <div class="text-emerald-400">{successEvents} traces</div>
                       <div class="text-red-400">{errorEvents} errors</div>

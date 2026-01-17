@@ -204,7 +204,7 @@
             <span
               class="text-[8px] font-mono text-slate-600 bg-white/5 px-1.5 py-0.5 rounded uppercase"
             >
-              {project.id.split("-")[0]}
+              {(project.id || "").split("-")[0]}
             </span>
           </div>
 
