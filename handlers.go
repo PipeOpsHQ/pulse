@@ -849,6 +849,13 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				continue
 			}
 
+			// DEBUG: Print raw JSON and unmarshalled exception to verify data
+			log.Printf("[DEBUG] Raw Transaction Payload (first 500 chars): %s", string(payload))
+			if len(payload) > 500 {
+				log.Printf("... (truncated)")
+			}
+			log.Printf("[DEBUG] Unmarshalled Exception Values count: %d", len(tx.Exception.Values))
+
 			// Convert root transaction to Span
 			rootSpan := &TraceSpan{
 				ID:             uuid.New().String(),
@@ -982,7 +989,80 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				}
 			}
 		}
-		// Future: Handle 'event' type here as well for unified ingestion
+		} else if itemHeader.Type == "event" {
+			var evt SentryEvent
+			if err := json.Unmarshal(payload, &evt); err != nil {
+				log.Printf("Failed to unmarshal event: %v", err)
+				continue
+			}
+
+			// Extract message
+			message := ""
+			if msgStr, ok := evt.Message.(string); ok {
+				message = msgStr
+			} else if msgObj, ok := evt.Message.(map[string]interface{}); ok {
+				if formatted, ok := msgObj["formatted"].(string); ok {
+					message = formatted
+				} else if msg, ok := msgObj["message"].(string); ok {
+					message = msg
+				}
+			}
+
+			// If no message, use exception value
+			if message == "" && len(evt.Exception.Values) > 0 {
+				message = evt.Exception.Values[0].Value
+				if evt.Exception.Values[0].Type != "" {
+					message = evt.Exception.Values[0].Type + ": " + message
+				}
+			}
+
+			// Extract stacktrace
+			var stacktraceData map[string]interface{}
+			if len(evt.Exception.Values) > 0 && evt.Exception.Values[0].Stacktrace != nil {
+				stacktraceData = evt.Exception.Values[0].Stacktrace
+			} else {
+				stacktraceData = make(map[string]interface{})
+			}
+
+			// Marshal JSON fields
+			stacktraceJSON, _ := json.Marshal(stacktraceData)
+			contextJSON, _ := json.Marshal(evt.Contexts)
+			userJSON, _ := json.Marshal(evt.User)
+			tagsJSON, _ := json.Marshal(evt.Tags)
+
+			// Timestamp
+			var ts time.Time
+			if evt.Timestamp != nil {
+				ts = floatToTime(float64(*evt.Timestamp))
+			} else {
+				ts = time.Now()
+			}
+
+			errorEvent := &ErrorEvent{
+				ID:          evt.EventID,
+				ProjectID:   projectID,
+				Message:     message,
+				Level:       evt.Level,
+				Environment: evt.Environment,
+				Release:     evt.Release,
+				Platform:    evt.Platform,
+				Timestamp:   ts,
+				Stacktrace:  string(stacktraceJSON),
+				Context:     string(contextJSON),
+				User:        string(userJSON),
+				Tags:        string(tagsJSON),
+			}
+
+			if errorEvent.Level == "" {
+				errorEvent.Level = "error"
+			}
+
+			if err := InsertError(db, errorEvent); err != nil {
+				log.Printf("[DSN Debug] Failed to insert error event: %v", err)
+			} else {
+				log.Printf("[DSN Debug] Successfully stored error event %s", evt.EventID)
+			}
+		}
 	}
 
 	w.WriteHeader(http.StatusAccepted)
