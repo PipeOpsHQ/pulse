@@ -403,6 +403,7 @@
                       ? 'bg-pulse-600'
                       : 'bg-white/10'}"
                     on:click={() => (showFullStacktrace = !showFullStacktrace)}
+                    aria-label="Toggle full stacktrace"
                   >
                     <span
                       class="pointer-events-none inline-block h-2.5 w-2.5 transform rounded-full bg-white shadow-lg transition duration-200 {showFullStacktrace
