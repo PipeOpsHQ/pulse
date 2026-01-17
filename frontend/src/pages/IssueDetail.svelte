@@ -255,6 +255,30 @@
             {/if}
           </div>
 
+          <div
+            class="flex flex-wrap items-center gap-6 mr-4 px-4 py-2 rounded-xl bg-white/5 border border-white/10"
+          >
+            <div class="flex flex-col items-center">
+              <span class="text-lg font-bold text-white leading-tight"
+                >{error.event_count || 1}</span
+              >
+              <span
+                class="text-[9px] font-black uppercase tracking-widest text-slate-500"
+                >Events</span
+              >
+            </div>
+            <div class="w-px h-8 bg-white/10"></div>
+            <div class="flex flex-col items-center">
+              <span class="text-lg font-bold text-white leading-tight"
+                >{error.user_count || 1}</span
+              >
+              <span
+                class="text-[9px] font-black uppercase tracking-widest text-slate-500"
+                >Users</span
+              >
+            </div>
+          </div>
+
           <div class="flex flex-wrap items-center gap-1.5">
             {#if error.status === "unresolved"}
               {@const statusColors = getIssueStatusColor(error.status)}
@@ -906,6 +930,18 @@
               <span
                 class="rounded bg-pulse-500/10 px-2 py-0.5 text-[10px] font-bold text-pulse-400"
                 >{error.environment || "Production"}</span
+              >
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-500">Events</span>
+              <span class="text-xs font-bold text-white tabular-nums"
+                >{error.event_count || 1}</span
+              >
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-500">Users</span>
+              <span class="text-xs font-bold text-white tabular-nums"
+                >{error.user_count || 1}</span
               >
             </div>
             <div class="flex items-center justify-between">

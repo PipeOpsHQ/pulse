@@ -421,7 +421,7 @@ func getError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	errorEvent, err := GetError(db, id)
+	errorEvent, err := GetErrorWithStats(db, id)
 	if err != nil {
 		http.Error(w, "Error not found", http.StatusNotFound)
 		return

@@ -20,7 +20,7 @@
     Activity,
     Info,
     Calendar,
-    ChevronRight,
+    ChevronRight as ChevronIcon,
     Search,
     Puzzle,
     Shield,
@@ -1313,7 +1313,6 @@ Sentry.init({
           >
             <div class="divide-y divide-white/[0.06]">
               {#each errors as error}
-                {@const levelColors = getErrorLevelColor(error.level)}
                 <div
                   role="button"
                   tabindex="0"
@@ -1323,7 +1322,7 @@ Sentry.init({
                     e.key === "Enter" && navigate(`/errors/${error.id}`)}
                 >
                   <div
-                    class="h-10 w-0.5 shrink-0 rounded-full transition-all group-hover:w-1 {levelColors.dot}"
+                    class="h-10 w-0.5 shrink-0 rounded-full transition-all group-hover:w-1 bg-pulse-500"
                   ></div>
                   <div class="flex-1 min-w-0">
                     <div
@@ -1335,9 +1334,7 @@ Sentry.init({
                       class="mt-1 flex items-center gap-2 text-[10px] text-slate-500"
                     >
                       <span
-                        class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight {getLevelColorClass(
-                          error.level,
-                        )}"
+                        class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-white/5 border border-white/10"
                       >
                         {error.level}
                       </span>
@@ -1350,7 +1347,7 @@ Sentry.init({
                       <span>{formatDate(error.created_at)}</span>
                     </div>
                   </div>
-                  <ChevronRight
+                  <ChevronIcon
                     size={16}
                     class="text-slate-700 transition-transform group-hover:translate-x-1 group-hover:text-white"
                   />

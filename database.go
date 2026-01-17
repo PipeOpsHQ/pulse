@@ -596,6 +596,65 @@ func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 	return &e, nil
 }
 
+func GetErrorWithStats(db *sql.DB, id string) (map[string]interface{}, error) {
+	e, err := GetError(db, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var eventCount int
+	db.QueryRow("SELECT COUNT(*) FROM errors WHERE message = ? AND project_id = ?", e.Message, e.ProjectID).Scan(&eventCount)
+
+	userRows, _ := db.Query("SELECT user FROM errors WHERE message = ? AND project_id = ? AND user IS NOT NULL AND user != ''", e.Message, e.ProjectID)
+	userSet := make(map[string]bool)
+	if userRows != nil {
+		defer userRows.Close()
+		for userRows.Next() {
+			var userJSON string
+			if err := userRows.Scan(&userJSON); err != nil {
+				continue
+			}
+			var userData map[string]interface{}
+			if err := json.Unmarshal([]byte(userJSON), &userData); err != nil {
+				continue
+			}
+			var userID string
+			if id, ok := userData["id"].(string); ok && id != "" {
+				userID = id
+			} else if email, ok := userData["email"].(string); ok && email != "" {
+				userID = email
+			} else if username, ok := userData["username"].(string); ok && username != "" {
+				userID = username
+			} else {
+				userID = userJSON
+			}
+			if userID != "" {
+				userSet[userID] = true
+			}
+		}
+	}
+	userCount := len(userSet)
+
+	return map[string]interface{}{
+		"id":          e.ID,
+		"project_id":  e.ProjectID,
+		"message":     e.Message,
+		"level":       e.Level,
+		"environment": e.Environment,
+		"release":     e.Release,
+		"platform":    e.Platform,
+		"timestamp":   e.Timestamp,
+		"stacktrace":  e.Stacktrace,
+		"context":     e.Context,
+		"user":        e.User,
+		"tags":        e.Tags,
+		"status":      e.Status,
+		"created_at":  e.CreatedAt,
+		"event_count": eventCount,
+		"user_count":  userCount,
+	}, nil
+}
+
 func DeleteError(db *sql.DB, id string) error {
 	_, err := db.Exec("DELETE FROM errors WHERE id = ?", id)
 	return err
