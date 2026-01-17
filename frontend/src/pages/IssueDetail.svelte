@@ -462,7 +462,9 @@
 
             <div class="overflow-hidden">
               {#if stackTraceView === "raw"}
-                <div class="p-6">
+                <div
+                  class="p-6 max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10"
+                >
                   <pre
                     class="font-mono text-xs leading-relaxed text-slate-300"><code
                       >{JSON.stringify(stacktrace, null, 2)}</code
@@ -472,7 +474,9 @@
                 {@const filteredFrames = (getFrames() || []).filter(
                   (f) => showFullStacktrace || f.in_app !== false,
                 )}
-                <div class="divide-y divide-white/[0.03]">
+                <div
+                  class="divide-y divide-white/[0.03] max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10"
+                >
                   {#each filteredFrames as frame, index}
                     {@const isExpanded = expandedFrames.has(index)}
                     {@const isInApp = frame.in_app !== false}
