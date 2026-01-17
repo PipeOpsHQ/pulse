@@ -1860,10 +1860,13 @@ Sentry.init({
 
         <div class="p-6 space-y-4">
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-2"
+            <label
+              for="monitor-name"
+              class="block text-xs font-medium text-slate-400 mb-2"
               >Monitor Name</label
             >
             <input
+              id="monitor-name"
               type="text"
               bind:value={newMonitor.name}
               placeholder="e.g., Production API"
@@ -1871,10 +1874,16 @@ Sentry.init({
             />
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-2"
+            <label
+              for="monitor-type"
+              class="block text-xs font-medium text-slate-400 mb-2"
               >Monitor Type</label
             >
-            <select bind:value={newMonitor.type} class="pulse-input w-full">
+            <select
+              id="monitor-type"
+              bind:value={newMonitor.type}
+              class="pulse-input w-full"
+            >
               <option value="http">HTTP/HTTPS</option>
               <option value="tcp">TCP</option>
               <option value="icmp">ICMP (Ping)</option>
@@ -1882,7 +1891,10 @@ Sentry.init({
             </select>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-400 mb-2">
+            <label
+              for="monitor-url"
+              class="block text-xs font-medium text-slate-400 mb-2"
+            >
               {#if newMonitor.type === "http" || newMonitor.type === "https"}
                 URL
               {:else if newMonitor.type === "tcp"}
@@ -1894,6 +1906,7 @@ Sentry.init({
               {/if}
             </label>
             <input
+              id="monitor-url"
               type="text"
               bind:value={newMonitor.url}
               placeholder={newMonitor.type === "http" ||
@@ -1909,10 +1922,13 @@ Sentry.init({
           </div>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-2"
+              <label
+                for="monitor-interval"
+                class="block text-xs font-medium text-slate-400 mb-2"
                 >Interval (seconds)</label
               >
               <input
+                id="monitor-interval"
                 type="number"
                 bind:value={newMonitor.interval}
                 min="30"
@@ -1921,10 +1937,13 @@ Sentry.init({
               />
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-2"
+              <label
+                for="monitor-timeout"
+                class="block text-slate-400 text-xs font-medium mb-2"
                 >Timeout (seconds)</label
               >
               <input
+                id="monitor-timeout"
                 type="number"
                 bind:value={newMonitor.timeout}
                 min="5"

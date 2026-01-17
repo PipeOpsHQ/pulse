@@ -1,6 +1,20 @@
 <script>
   import { navigate } from "../lib/router";
   import Link from "../components/Link.svelte";
+  import {
+    Zap,
+    Shield,
+    Layers,
+    Feather,
+    Activity,
+    Code,
+    Lock,
+    Github,
+    Twitter,
+    Layout,
+    ArrowRight,
+    Search,
+  } from "lucide-svelte";
 
   function handleGetStarted() {
     navigate("/login");
@@ -14,11 +28,27 @@
   >
     <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
       <div class="flex items-center gap-2">
-        <div
-          class="flex h-8 w-8 items-center justify-center rounded-lg bg-pulse-600"
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 100 100"
+          class="h-8 w-8"
         >
-          <span class="ni ni-activity text-lg text-white"></span>
-        </div>
+          <defs>
+            <linearGradient id="nav-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+            </linearGradient>
+          </defs>
+          <rect width="100" height="100" rx="20" fill="url(#nav-grad)" />
+          <path
+            d="M20 50 L35 50 L45 20 L55 80 L65 50 L80 50"
+            fill="none"
+            stroke="white"
+            stroke-width="8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
         <span class="text-xl font-bold tracking-tight">Pulse</span>
       </div>
       <div class="flex items-center gap-6">
@@ -121,26 +151,46 @@
             class="aspect-video bg-[#050505] p-8 flex items-center justify-center relative"
           >
             <!-- Placeholder for a real screenshot if available, otherwise a nice graphic -->
-            <div class="grid grid-cols-3 gap-6 w-full opacity-40">
+            <div
+              class="grid grid-cols-3 gap-6 w-[80%] opacity-20 group-hover:opacity-40 transition-opacity"
+            >
               <div
-                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse"
-              ></div>
+                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse flex items-center justify-center"
+              >
+                <Zap size={24} class="text-orange-500" />
+              </div>
               <div
-                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse"
+                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse flex items-center justify-center"
                 style="animation-delay: 0.2s"
-              ></div>
+              >
+                <Activity size={24} class="text-pulse-500" />
+              </div>
               <div
-                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse"
+                class="h-32 rounded-lg bg-white/5 border border-white/5 animate-pulse flex items-center justify-center"
                 style="animation-delay: 0.4s"
-              ></div>
+              >
+                <Shield size={24} class="text-blue-500" />
+              </div>
               <div
-                class="col-span-2 h-64 rounded-lg bg-white/5 border border-white/5 animate-pulse"
+                class="col-span-2 h-44 rounded-lg bg-white/5 border border-white/5 animate-pulse p-4"
                 style="animation-delay: 0.1s"
-              ></div>
+              >
+                <div class="flex gap-2 mb-4">
+                  <div class="h-2 w-1/4 bg-white/10 rounded"></div>
+                  <div class="h-2 w-1/2 bg-white/10 rounded"></div>
+                </div>
+                <div class="space-y-3">
+                  <div class="h-2 w-full bg-white/5 rounded"></div>
+                  <div class="h-2 w-[90%] bg-white/5 rounded"></div>
+                  <div class="h-2 w-[95%] bg-white/5 rounded"></div>
+                </div>
+              </div>
               <div
-                class="h-64 rounded-lg bg-white/5 border border-white/5 animate-pulse"
+                class="h-44 rounded-lg bg-white/5 border border-white/5 animate-pulse flex items-center justify-center"
                 style="animation-delay: 0.3s"
-              ></div>
+              >
+                <Code size={24} class="text-purple-500" />
+              </div>
             </div>
             <div
               class="absolute inset-0 flex flex-col items-center justify-center"
@@ -148,7 +198,7 @@
               <div
                 class="h-16 w-16 mb-4 rounded-full bg-pulse-600/20 flex items-center justify-center border border-pulse-500/30"
               >
-                <span class="ni ni-lock text-3xl text-pulse-400"></span>
+                <Activity size={32} class="text-pulse-400" />
               </div>
               <p class="text-slate-200 font-medium">
                 Beautiful Performance Metrics
@@ -181,7 +231,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400"
           >
-            <span class="ni ni-zap text-2xl"></span>
+            <Zap size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">Sentry Compatible</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -197,7 +247,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400"
           >
-            <span class="ni ni-shield text-2xl"></span>
+            <Shield size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">Privacy First</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -213,7 +263,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-pulse-500/10 text-pulse-400"
           >
-            <span class="ni ni-layers text-2xl"></span>
+            <Layers size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">Full-Stack Context</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -229,7 +279,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10 text-green-400"
           >
-            <span class="ni ni-feather text-2xl"></span>
+            <Feather size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">Feather Light</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -245,7 +295,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10 text-red-400"
           >
-            <span class="ni ni-broadcast text-2xl"></span>
+            <Activity size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">Real-time Insights</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -261,7 +311,7 @@
           <div
             class="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400"
           >
-            <span class="ni ni-code text-2xl"></span>
+            <Code size={24} />
           </div>
           <h3 class="text-xl font-bold mb-3">100% Open Source</h3>
           <p class="text-slate-400 leading-relaxed">
@@ -313,9 +363,21 @@
       class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row items-center justify-between gap-6"
     >
       <div class="flex items-center gap-2 grayscale border-none opacity-40">
-        <div class="flex h-6 w-6 items-center justify-center rounded bg-white">
-          <span class="ni ni-activity text-sm text-black"></span>
-        </div>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 100 100"
+          class="h-6 w-6"
+        >
+          <rect width="100" height="100" rx="20" fill="currentColor" />
+          <path
+            d="M20 50 L35 50 L45 20 L55 80 L65 50 L80 50"
+            fill="none"
+            stroke="white"
+            stroke-width="8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
         <span class="text-lg font-bold tracking-tight">Pulse</span>
       </div>
       <p class="text-sm text-slate-500">© 2026 PipeOps. Licensed under MIT.</p>
@@ -325,14 +387,14 @@
           target="_blank"
           aria-label="Follow us on Twitter"
           class="text-slate-500 hover:text-white transition-colors"
-          ><span class="ni ni-twitter"></span></a
+          ><Twitter size={20} /></a
         >
         <a
           href="https://github.com/PipeOpsHQ/pulse"
           target="_blank"
           aria-label="View on GitHub"
           class="text-slate-500 hover:text-white transition-colors"
-          ><span class="ni ni-github"></span></a
+          ><Github size={20} /></a
         >
       </div>
     </div>

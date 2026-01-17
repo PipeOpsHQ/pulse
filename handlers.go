@@ -20,6 +20,36 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
+// FlexTimestamp handles timestamps that can be either float64 (Unix) or string (ISO8601)
+type FlexTimestamp float64
+
+func (ft *FlexTimestamp) UnmarshalJSON(data []byte) error {
+	// Try float64 first
+	var f float64
+	if err := json.Unmarshal(data, &f); err == nil {
+		*ft = FlexTimestamp(f)
+		return nil
+	}
+
+	// Try string (ISO8601) next
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		t, err := time.Parse(time.RFC3339, s)
+		if err == nil {
+			*ft = FlexTimestamp(float64(t.UnixNano()) / 1e9)
+			return nil
+		}
+		// Try without timezone/fractional if RFC3339 fails (Sentry sometimes sends "2024-01-01T00:00:00")
+		t, err = time.Parse("2006-01-02T15:04:05", s)
+		if err == nil {
+			*ft = FlexTimestamp(float64(t.UnixNano()) / 1e9)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to unmarshal FlexTimestamp: %s", string(data))
+}
+
 type StoreRequest struct {
 	Message     string                 `json:"message"`
 	Level       string                 `json:"level"`
@@ -59,9 +89,9 @@ type SentryTransaction struct {
 			Status       string `json:"status"`
 		} `json:"trace"`
 	} `json:"contexts"`
-	Spans          []SentrySpan `json:"spans"`
-	StartTimestamp float64      `json:"start_timestamp"`
-	Timestamp      float64      `json:"timestamp"`
+	Spans          []SentrySpan  `json:"spans"`
+	StartTimestamp FlexTimestamp `json:"start_timestamp"`
+	Timestamp      FlexTimestamp `json:"timestamp"`
 }
 
 type SentrySpan struct {
@@ -70,8 +100,8 @@ type SentrySpan struct {
 	ParentSpanID   string                 `json:"parent_span_id"`
 	Op             string                 `json:"op"`
 	Description    string                 `json:"description"`
-	StartTimestamp float64                `json:"start_timestamp"`
-	Timestamp      float64                `json:"timestamp"`
+	StartTimestamp FlexTimestamp          `json:"start_timestamp"`
+	Timestamp      FlexTimestamp          `json:"timestamp"`
 	Status         string                 `json:"status"`
 	Data           map[string]interface{} `json:"data"`
 }
@@ -117,14 +147,14 @@ type SentryEvent struct {
 	Environment    string                 `json:"environment"`
 	Release        string                 `json:"release"`
 	Platform       string                 `json:"platform"`
-	Timestamp      *time.Time             `json:"timestamp"`
+	Timestamp      *FlexTimestamp         `json:"timestamp"`
 	User           map[string]interface{} `json:"user"`
 	Tags           map[string]interface{} `json:"tags"`
 	Contexts       map[string]interface{} `json:"contexts"`
 	Extra          map[string]interface{} `json:"extra"`
 	Transaction    string                 `json:"transaction"`     // For transaction events
 	Spans          []SentrySpan           `json:"spans"`           // For transaction events
-	StartTimestamp *float64               `json:"start_timestamp"` // For transaction events
+	StartTimestamp *FlexTimestamp         `json:"start_timestamp"` // For transaction events
 }
 
 type SentryException struct {
@@ -476,10 +506,10 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		startTime := time.Now()
 		endTime := time.Now()
 		if tx.StartTimestamp > 0 {
-			startTime = floatToTime(tx.StartTimestamp)
+			startTime = floatToTime(float64(tx.StartTimestamp))
 		}
 		if tx.Timestamp > 0 {
-			endTime = floatToTime(tx.Timestamp)
+			endTime = floatToTime(float64(tx.Timestamp))
 		}
 
 		rootSpan := &TraceSpan{
@@ -522,8 +552,8 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		// Process child spans
 		for _, s := range tx.Spans {
 			dataJSON, _ := json.Marshal(s.Data)
-			childStartTime := floatToTime(s.StartTimestamp)
-			childEndTime := floatToTime(s.Timestamp)
+			childStartTime := floatToTime(float64(s.StartTimestamp))
+			childEndTime := floatToTime(float64(s.Timestamp))
 			childSpan := &TraceSpan{
 				ID:             uuid.New().String(),
 				ProjectID:      projectID,
@@ -621,7 +651,7 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	timestamp := time.Now()
 	if sentryEvent.Timestamp != nil {
-		timestamp = *sentryEvent.Timestamp
+		timestamp = floatToTime(float64(*sentryEvent.Timestamp))
 	}
 
 	level := sentryEvent.Level
@@ -799,8 +829,8 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				Name:           tx.Transaction,
 				Op:             tx.Contexts.Trace.Op,
 				Description:    tx.Transaction, // Root span description is often the name
-				StartTimestamp: floatToTime(tx.StartTimestamp),
-				Timestamp:      floatToTime(tx.Timestamp),
+				StartTimestamp: floatToTime(float64(tx.StartTimestamp)),
+				Timestamp:      floatToTime(float64(tx.Timestamp)),
 				Status:         tx.Contexts.Trace.Status,
 				Data:           "{}", // Can populate with more context
 			}
@@ -826,8 +856,8 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					Name:           s.Description, // Spans use description as name often
 					Op:             s.Op,
 					Description:    s.Description,
-					StartTimestamp: floatToTime(s.StartTimestamp),
-					Timestamp:      floatToTime(s.Timestamp),
+					StartTimestamp: floatToTime(float64(s.StartTimestamp)),
+					Timestamp:      floatToTime(float64(s.Timestamp)),
 					Status:         s.Status,
 					Data:           string(dataJSON),
 				}
