@@ -13,6 +13,16 @@ install-go:
 
 # Install frontend dependencies
 install-frontend:
+	@NODE_VERSION=$$(node --version 2>/dev/null | cut -d'v' -f2); \
+	NODE_MAJOR=$$(echo $$NODE_VERSION | cut -d'.' -f1); \
+	if [ -z "$$NODE_VERSION" ]; then \
+		echo "[ERROR] Node.js not found. Please install Node.js 20.19+ or 22.12+"; \
+		exit 1; \
+	elif [ "$$NODE_MAJOR" -lt 20 ]; then \
+		echo "[ERROR] Node.js version $$NODE_VERSION is too old. Vite requires Node.js 20.19+ or 22.12+"; \
+		echo "Please run: nvm use 22 (or nvm use 20)"; \
+		exit 1; \
+	fi
 	cd frontend && npm install
 
 # Install all dependencies
@@ -20,7 +30,7 @@ install: install-go install-frontend
 
 # Build frontend
 build-frontend:
-	cd frontend && npm run build
+	@cd frontend && ./build.sh
 
 # Run the backend server
 run: build
