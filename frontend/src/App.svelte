@@ -14,6 +14,7 @@
   import TraceDetail from "./pages/TraceDetail.svelte";
   import StatusPage from "./pages/StatusPage.svelte";
   import Insights from "./pages/Insights.svelte";
+  import Landing from "./pages/Landing.svelte";
   import { onMount } from "svelte";
   import { isAuthenticated } from "./stores/auth";
 
@@ -44,7 +45,8 @@
   function getBreadcrumbs(path) {
     const crumbs = [{ label: "Pulse", path: "/" }];
 
-    if (path === "/" || path === "/login") return crumbs;
+    if (path === "/") return crumbs;
+    if (path === "/login") return crumbs;
 
     if (path.startsWith("/projects/")) {
       const parts = path.split("/").filter((p) => p);
@@ -83,7 +85,7 @@
   }
 
   function isPublicRoute(path) {
-    return path === "/login" || path.startsWith("/status/");
+    return path === "/" || path === "/login" || path.startsWith("/status/");
   }
 </script>
 
@@ -101,6 +103,12 @@
   <Login />
 {:else if currentPath.startsWith("/status/")}
   <StatusPage />
+{:else if !authenticated && currentPath === "/"}
+  <Landing />
+{:else if !authenticated && !isPublicRoute(currentPath)}
+  <Login />
+{:else if currentPath === "/login"}
+  <Login />
 {:else}
   <div class="flex min-h-screen bg-[#050505] text-white">
     <Sidebar {currentPath} />
@@ -110,7 +118,7 @@
 
       <main class="flex-1 overflow-y-auto p-4 md:p-8">
         <div class="mx-auto w-full max-w-7xl">
-          {#if currentPath === "/" || currentPath === "/dashboard"}
+          {#if (currentPath === "/" && authenticated) || currentPath === "/dashboard"}
             <Dashboard />
           {:else if currentPath === "/projects"}
             <Projects />
