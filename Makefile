@@ -44,7 +44,7 @@ dev:
 clean:
 	rm -f sentry-alt
 	rm -rf frontend/node_modules
-	rm -rf frontend/public
+	rm -rf frontend/dist
 	rm -f *.db *.sqlite *.sqlite3
 
 # Full production build
