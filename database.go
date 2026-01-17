@@ -1412,7 +1412,11 @@ func GetSystemStats(db *sql.DB) (SystemStats, error) {
 	db.QueryRow("SELECT COUNT(*) FROM monitors").Scan(&stats.Monitors)
 	db.QueryRow("SELECT COUNT(*) FROM coverage_history").Scan(&stats.CoverageSnapshots)
 
-	stats.DatabasePath = "./pulse.db" // Matches main.go's default
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./data/sentry.db"
+	}
+	stats.DatabasePath = dbPath
 	if fileInfo, err := os.Stat(stats.DatabasePath); err == nil {
 		stats.DatabaseSize = fileInfo.Size()
 	}
