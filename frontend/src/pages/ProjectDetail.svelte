@@ -4,7 +4,7 @@
   import Link from "../components/Link.svelte";
   import { api } from "../lib/api";
   import { toast } from "../stores/toast";
-  import { ensureHttps } from "../lib/utils.js";
+  import { ensureHttps } from "../lib/utils";
   import {
     getErrorLevelColor,
     getMonitorStatusColor,
