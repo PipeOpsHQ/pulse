@@ -67,7 +67,6 @@ func main() {
 		storeErrorSentry(w, r, db)
 	}).Methods("POST", "OPTIONS")
 
-
 	// Sentry project discovery endpoint (used by some SDKs)
 	api.HandleFunc("/{projectId}/", func(w http.ResponseWriter, r *http.Request) {
 		getProjectDiscovery(w, r, db)
@@ -234,8 +233,7 @@ func main() {
 	}).Methods("POST", "OPTIONS")
 
 	// Serve static files (SPA routing - serve index.html for all non-API routes)
-	staticDir := http.Dir("./frontend/public")
-	fileServer := http.FileServer(staticDir)
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("./frontend/dist/assets"))))
 
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Don't serve index.html for API routes
@@ -244,16 +242,15 @@ func main() {
 			return
 		}
 
-		// Try to serve the file, if not found, serve index.html (SPA routing)
-		path := "./frontend/public" + req.URL.Path
+		// Try to serve the file directly if it exists in dist
+		path := "./frontend/dist" + req.URL.Path
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			// File exists, serve it
-			fileServer.ServeHTTP(w, req)
-		} else {
-			// File doesn't exist, serve index.html for SPA routing
-			req.URL.Path = "/"
-			http.ServeFile(w, req, "./frontend/public/index.html")
+			http.FileServer(http.Dir("./frontend/dist")).ServeHTTP(w, req)
+			return
 		}
+
+		// Otherwise serve index.html for SPA routing
+		http.ServeFile(w, req, "./frontend/dist/index.html")
 	})
 
 	port := os.Getenv("PORT")

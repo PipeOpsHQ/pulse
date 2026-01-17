@@ -1,14 +1,15 @@
 <script>
-  import { onMount } from 'svelte';
-  import { Link } from 'svelte-routing';
-  import { Activity, Clock, ArrowRight, ChevronLeft } from 'lucide-svelte';
-  import { apiGet } from '../lib/api.js';
-  import { toast } from '../stores/toast.js';
+  import { onMount } from "svelte";
+  import { navigate } from "../lib/router";
+  import Link from "../components/Link.svelte";
+  import { Activity, Clock, ArrowRight, ChevronLeft } from "lucide-svelte";
+  import { apiGet } from "../lib/api.js";
+  import { toast } from "../stores/toast.js";
 
   let spans = [];
   let loading = true;
-  let projectId = '';
-  let traceId = '';
+  let projectId = "";
+  let traceId = "";
 
   onMount(async () => {
     // Get project ID and trace ID from URL
@@ -28,45 +29,45 @@
       const data = await apiGet(`/projects/${projectId}/traces/${traceId}`);
       spans = data || [];
     } catch (error) {
-      console.error('Failed to load trace details:', error);
-      toast.error('Failed to load trace details');
+      console.error("Failed to load trace details:", error);
+      toast.error("Failed to load trace details");
     } finally {
       loading = false;
     }
   }
 
   function formatDuration(start, end) {
-    if (!start || !end) return 'N/A';
+    if (!start || !end) return "N/A";
     const startTime = new Date(start).getTime();
     const endTime = new Date(end).getTime();
     return `${(endTime - startTime).toFixed(2)}ms`;
   }
 
   function formatDate(dateString) {
-    if (!dateString) return 'N/A';
+    if (!dateString) return "N/A";
     return new Date(dateString).toLocaleString();
   }
 
   function getStatusColor(status) {
     const colors = {
-      ok: 'text-emerald-400',
-      cancelled: 'text-amber-400',
-      invalid_argument: 'text-red-400',
-      deadline_exceeded: 'text-red-400',
-      not_found: 'text-red-400',
-      already_exists: 'text-amber-400',
-      permission_denied: 'text-red-400',
-      resource_exhausted: 'text-red-400',
-      failed_precondition: 'text-amber-400',
-      aborted: 'text-amber-400',
-      out_of_range: 'text-red-400',
-      unimplemented: 'text-amber-400',
-      internal: 'text-red-400',
-      unavailable: 'text-red-400',
-      data_loss: 'text-red-400',
-      unauthenticated: 'text-red-400'
+      ok: "text-emerald-400",
+      cancelled: "text-amber-400",
+      invalid_argument: "text-red-400",
+      deadline_exceeded: "text-red-400",
+      not_found: "text-red-400",
+      already_exists: "text-amber-400",
+      permission_denied: "text-red-400",
+      resource_exhausted: "text-red-400",
+      failed_precondition: "text-amber-400",
+      aborted: "text-amber-400",
+      out_of_range: "text-red-400",
+      unimplemented: "text-amber-400",
+      internal: "text-red-400",
+      unavailable: "text-red-400",
+      data_loss: "text-red-400",
+      unauthenticated: "text-red-400",
     };
-    return colors[status?.toLowerCase()] || 'text-slate-400';
+    return colors[status?.toLowerCase()] || "text-slate-400";
   }
 
   // Build tree structure from spans
@@ -79,14 +80,14 @@
     const roots = [];
 
     // First pass: create map
-    spans.forEach(span => {
+    spans.forEach((span) => {
       spanMap.set(span.span_id, { ...span, children: [] });
     });
 
     // Second pass: build tree
-    spans.forEach(span => {
+    spans.forEach((span) => {
       const node = spanMap.get(span.span_id);
-      if (!span.parent_span_id || span.parent_span_id === '') {
+      if (!span.parent_span_id || span.parent_span_id === "") {
         roots.push(node);
       } else {
         const parent = spanMap.get(span.parent_span_id);
@@ -102,10 +103,15 @@
   }
 </script>
 
-<div class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 sm:p-6 lg:p-8">
+<div
+  class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 sm:p-6 lg:p-8"
+>
   <div class="mx-auto max-w-7xl">
     <div class="mb-8">
-      <Link to="/projects/{projectId}/traces" class="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-pulse-400 mb-4 transition-colors">
+      <Link
+        to="/projects/{projectId}/traces"
+        class="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-pulse-400 mb-4 transition-colors"
+      >
         <ChevronLeft size={16} />
         Back to Traces
       </Link>
@@ -115,7 +121,9 @@
 
     {#if loading}
       <div class="pulse-card p-12 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-pulse-400"></div>
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-pulse-400"
+        ></div>
         <p class="mt-4 text-slate-400">Loading trace details...</p>
       </div>
     {:else if spans.length === 0}
@@ -130,20 +138,30 @@
             <div class="mb-4">
               <div class="flex items-center gap-3 mb-2">
                 <Activity size={18} class="text-pulse-400" />
-                <span class="font-mono text-sm text-pulse-400">{rootSpan.span_id}</span>
+                <span class="font-mono text-sm text-pulse-400"
+                  >{rootSpan.span_id}</span
+                >
                 {#if rootSpan.status}
-                  <span class="rounded px-2 py-0.5 bg-white/10 text-xs font-bold uppercase {getStatusColor(rootSpan.status)}">
+                  <span
+                    class="rounded px-2 py-0.5 bg-white/10 text-xs font-bold uppercase {getStatusColor(
+                      rootSpan.status,
+                    )}"
+                  >
                     {rootSpan.status}
                   </span>
                 {/if}
               </div>
 
               {#if rootSpan.name}
-                <h3 class="text-lg font-semibold text-white">{rootSpan.name}</h3>
+                <h3 class="text-lg font-semibold text-white">
+                  {rootSpan.name}
+                </h3>
               {/if}
 
               {#if rootSpan.description}
-                <p class="text-sm text-slate-400 mt-1">{rootSpan.description}</p>
+                <p class="text-sm text-slate-400 mt-1">
+                  {rootSpan.description}
+                </p>
               {/if}
             </div>
 
@@ -158,21 +176,35 @@
               {#if rootSpan.start_timestamp && rootSpan.timestamp}
                 <div>
                   <span class="text-slate-500">Duration</span>
-                  <p class="text-slate-300">{formatDuration(rootSpan.start_timestamp, rootSpan.timestamp)}</p>
+                  <p class="text-slate-300">
+                    {formatDuration(
+                      rootSpan.start_timestamp,
+                      rootSpan.timestamp,
+                    )}
+                  </p>
                 </div>
               {/if}
 
               {#if rootSpan.start_timestamp}
                 <div>
                   <span class="text-slate-500">Started</span>
-                  <p class="text-slate-300">{formatDate(rootSpan.start_timestamp)}</p>
+                  <p class="text-slate-300">
+                    {formatDate(rootSpan.start_timestamp)}
+                  </p>
                 </div>
               {/if}
             </div>
 
             {#if rootSpan.data}
-              <div class="mt-4 p-4 bg-slate-900/50 rounded-lg border border-white/5">
-                <pre class="text-xs text-slate-300 overflow-x-auto">{JSON.stringify(JSON.parse(rootSpan.data || '{}'), null, 2)}</pre>
+              <div
+                class="mt-4 p-4 bg-slate-900/50 rounded-lg border border-white/5"
+              >
+                <pre
+                  class="text-xs text-slate-300 overflow-x-auto">{JSON.stringify(
+                    JSON.parse(rootSpan.data || "{}"),
+                    null,
+                    2,
+                  )}</pre>
               </div>
             {/if}
 
@@ -182,16 +214,24 @@
                   <div class="pulse-card p-4 bg-white/5">
                     <div class="flex items-center gap-2 mb-2">
                       <ArrowRight size={14} class="text-slate-500" />
-                      <span class="font-mono text-xs text-pulse-400">{child.span_id}</span>
+                      <span class="font-mono text-xs text-pulse-400"
+                        >{child.span_id}</span
+                      >
                       {#if child.status}
-                        <span class="rounded px-1.5 py-0.5 bg-white/10 text-[10px] font-bold uppercase {getStatusColor(child.status)}">
+                        <span
+                          class="rounded px-1.5 py-0.5 bg-white/10 text-[10px] font-bold uppercase {getStatusColor(
+                            child.status,
+                          )}"
+                        >
                           {child.status}
                         </span>
                       {/if}
                     </div>
 
                     {#if child.name}
-                      <p class="text-sm font-semibold text-white">{child.name}</p>
+                      <p class="text-sm font-semibold text-white">
+                        {child.name}
+                      </p>
                     {/if}
 
                     {#if child.op}
@@ -199,7 +239,9 @@
                     {/if}
 
                     {#if child.start_timestamp && child.timestamp}
-                      <p class="text-xs text-slate-500 mt-2">{formatDuration(child.start_timestamp, child.timestamp)}</p>
+                      <p class="text-xs text-slate-500 mt-2">
+                        {formatDuration(child.start_timestamp, child.timestamp)}
+                      </p>
                     {/if}
                   </div>
                 {/each}

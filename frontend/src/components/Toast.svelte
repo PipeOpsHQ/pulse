@@ -1,6 +1,5 @@
 <script>
   import { toast } from '../stores/toast';
-  import { fade, fly } from 'svelte/transition';
 
   function getIcon(type) {
     switch (type) {
@@ -20,11 +19,7 @@
 
 <div class="toast-container">
   {#each $toast as notification (notification.id)}
-    <div
-      class="toast {notification.type}"
-      in:fly={{ x: 300, duration: 300 }}
-      out:fade={{ duration: 200 }}
-    >
+    <div class="toast {notification.type}">
       <div class="toast-icon">{getIcon(notification.type)}</div>
       <div class="toast-message">{notification.message}</div>
       <button class="toast-close" on:click={() => toast.remove(notification.id)}>×</button>

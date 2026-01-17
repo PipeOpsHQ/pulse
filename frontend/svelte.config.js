@@ -1,5 +1,8 @@
 export default {
   compilerOptions: {
-    css: 'injected'
+    css: 'injected',
+    compatibility: {
+      componentApi: 4
+    }
   }
 };

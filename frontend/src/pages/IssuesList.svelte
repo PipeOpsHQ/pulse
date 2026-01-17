@@ -1,8 +1,9 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { Link } from 'svelte-routing';
-  import { api } from '../lib/api';
-  import { getErrorLevelColor, getIssueStatusColor } from '../lib/statusColors';
+  import { onMount, onDestroy } from "svelte";
+  import { navigate } from "../lib/router";
+  import Link from "../components/Link.svelte";
+  import { api } from "../lib/api";
+  import { getErrorLevelColor, getIssueStatusColor } from "../lib/statusColors";
   import {
     Search,
     ArrowUpDown,
@@ -13,22 +14,23 @@
     Filter,
     Activity,
     Inbox,
-    Target
-  } from 'lucide-svelte';
+    Target,
+  } from "lucide-svelte";
 
   let issues = [];
   let projects = [];
   let loading = true;
-  let activeTab = 'unresolved';
-  let sortBy = 'lastSeen';
-  let searchQuery = '';
-  let selectedProjectId = '';
+  let activeTab = "unresolved";
+  let sortBy = "lastSeen";
+  let searchQuery = "";
+  let selectedProjectId = "";
   let meta = { total: 0, limit: 50, offset: 0 };
+  let filteredIssues = [];
 
   const tabs = [
-    { id: 'unresolved', label: 'Unresolved', icon: Inbox },
-    { id: 'resolved', label: 'Resolved', icon: Target },
-    { id: 'ignored', label: 'Ignored', icon: Filter }
+    { id: "unresolved", label: "Unresolved", icon: Inbox },
+    { id: "resolved", label: "Resolved", icon: Target },
+    { id: "ignored", label: "Ignored", icon: Filter },
   ];
 
   let refreshInterval = null;
@@ -43,9 +45,9 @@
   onMount(async () => {
     await Promise.all([
       loadProjects(),
-      loadIssues(0, true) // Initial load
+      loadIssues(0, true), // Initial load
     ]);
-    document.addEventListener('visibilitychange', visibilityHandler);
+    document.addEventListener("visibilitychange", visibilityHandler);
 
     // Set up real-time polling every 10 seconds
     refreshInterval = setInterval(() => {
@@ -56,7 +58,7 @@
   });
 
   onDestroy(() => {
-    document.removeEventListener('visibilitychange', visibilityHandler);
+    document.removeEventListener("visibilitychange", visibilityHandler);
     if (refreshInterval) {
       clearInterval(refreshInterval);
     }
@@ -64,10 +66,10 @@
 
   async function loadProjects() {
     try {
-      const response = await api.get('/projects');
-      projects = Array.isArray(response) ? response : (response?.data || []);
+      const response = await api.get("/projects");
+      projects = Array.isArray(response) ? response : response?.data || [];
     } catch (error) {
-      console.error('Failed to load projects:', error);
+      console.error("Failed to load projects:", error);
       projects = [];
     }
   }
@@ -77,7 +79,7 @@
       loading = true;
     }
     try {
-      const status = activeTab === 'unresolved' ? 'unresolved' : activeTab;
+      const status = activeTab === "unresolved" ? "unresolved" : activeTab;
       let url = `/errors?status=${status}&limit=50&offset=${offset}`;
       if (selectedProjectId) {
         url += `&projectId=${selectedProjectId}`;
@@ -87,18 +89,20 @@
       const rawIssues = response?.data || response || [];
       meta = response?.meta || { total: 0, limit: 50, offset: 0 };
 
-      issues = Array.isArray(rawIssues) ? rawIssues.map(issue => {
-        const project = projects.find(p => p.id === issue.project_id);
-        return {
-          ...issue,
-          projectName: project ? project.name : 'Unknown Project',
-          // Use actual stats from API
-          eventCount: issue.event_count || 1,
-          userCount: issue.user_count || 0
-        };
-      }) : [];
+      issues = Array.isArray(rawIssues)
+        ? rawIssues.map((issue) => {
+            const project = projects.find((p) => p.id === issue.project_id);
+            return {
+              ...issue,
+              projectName: project ? project.name : "Unknown Project",
+              // Use actual stats from API
+              eventCount: issue.event_count || 1,
+              userCount: issue.user_count || 0,
+            };
+          })
+        : [];
     } catch (error) {
-      console.error('Failed to load issues:', error);
+      console.error("Failed to load issues:", error);
     } finally {
       if (showLoading) {
         loading = false;
@@ -119,22 +123,26 @@
     loadIssues(0);
   }
 
+  // Filter and sort issues reactively
   $: filteredIssues = (() => {
     // First filter
-    let filtered = searchQuery
-      ? (issues || []).filter(issue =>
-          issue.message?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          issue.projectName?.toLowerCase().includes(searchQuery.toLowerCase())
+    const filtered = searchQuery
+      ? (issues || []).filter(
+          (issue) =>
+            issue.message?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            issue.projectName
+              ?.toLowerCase()
+              .includes(searchQuery.toLowerCase()),
         )
-      : (issues || []);
-    
-    // Then sort (create new array, don't mutate)
+      : issues || [];
+
+    // Then sort (create new array, don't mutate original)
     const sorted = [...filtered];
-    if (sortBy === 'events') {
+    if (sortBy === "events") {
       sorted.sort((a, b) => b.eventCount - a.eventCount);
-    } else if (sortBy === 'users') {
+    } else if (sortBy === "users") {
       sorted.sort((a, b) => b.userCount - a.userCount);
-    } else if (sortBy === 'firstSeen') {
+    } else if (sortBy === "firstSeen") {
       sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     } else {
       sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -160,11 +168,14 @@
     const hours = Math.floor(diff / 3600000);
     const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) return 'just now';
+    if (minutes < 1) return "just now";
     if (minutes < 60) return `${minutes}m ago`;
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
   }
 
   function getIssueUrl(issue) {
@@ -173,15 +184,24 @@
 </script>
 
 <div class="animate-in fade-in slide-in-from-bottom-4 duration-500">
-  <div class="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+  <div
+    class="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center"
+  >
     <div>
-      <h1 class="text-xl font-semibold tracking-tight text-white mb-0.5">Issues</h1>
-      <p class="text-xs text-slate-400">Track and manage application errors across all environments</p>
+      <h1 class="text-xl font-semibold tracking-tight text-white mb-0.5">
+        Issues
+      </h1>
+      <p class="text-xs text-slate-400">
+        Track and manage application errors across all environments
+      </p>
     </div>
 
     <div class="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-3">
       <div class="relative">
-        <Filter size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+        <Filter
+          size={14}
+          class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+        />
         <select
           bind:value={selectedProjectId}
           on:change={handleProjectChange}
@@ -195,7 +215,10 @@
       </div>
 
       <div class="relative">
-        <ArrowUpDown size={12} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+        <ArrowUpDown
+          size={12}
+          class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"
+        />
         <select
           bind:value={sortBy}
           class="h-9 w-full sm:w-40 rounded-lg border border-white/[0.08] bg-white/[0.04] pl-8 pr-3 text-xs font-medium text-white outline-none focus:border-pulse-500/50 focus:ring-1 focus:ring-pulse-500/20 focus:bg-white/[0.06] active:scale-[0.98] transition-all duration-200 appearance-none cursor-pointer"
@@ -210,9 +233,13 @@
   </div>
 
   <!-- Filters Bar -->
-  <div class="mb-3 overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl">
+  <div
+    class="mb-3 overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl"
+  >
     <div class="flex flex-col border-b border-white/[0.08] lg:flex-row">
-      <div class="flex overflow-x-auto no-scrollbar border-b border-white/[0.08] px-1.5 lg:border-b-0 lg:border-r">
+      <div
+        class="flex overflow-x-auto no-scrollbar border-b border-white/[0.08] px-1.5 lg:border-b-0 lg:border-r"
+      >
         {#each tabs as tab}
           <button
             class="relative flex items-center gap-1.5 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider transition-all duration-200 whitespace-nowrap"
@@ -224,7 +251,9 @@
             <svelte:component this={tab.icon} size={12} />
             <span>{tab.label}</span>
             {#if activeTab === tab.id}
-              <div class="absolute bottom-0 left-0 h-0.5 w-full bg-gradient-to-r from-pulse-500 to-pulse-400"></div>
+              <div
+                class="absolute bottom-0 left-0 h-0.5 w-full bg-gradient-to-r from-pulse-500 to-pulse-400"
+              ></div>
             {/if}
           </button>
         {/each}
@@ -243,7 +272,9 @@
   </div>
 
   <!-- Issues List -->
-  <div class="overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl">
+  <div
+    class="overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl"
+  >
     {#if loading}
       <div class="divide-y divide-white/5 text-slate-500">
         {#each Array(8) as _}
@@ -252,31 +283,53 @@
       </div>
     {:else if filteredIssues.length === 0}
       <div class="flex flex-col items-center justify-center py-20">
-        <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-pulse-500/10 text-pulse-400">
+        <div
+          class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-pulse-500/10 text-pulse-400"
+        >
           <Activity size={32} />
         </div>
         <h3 class="mb-1 text-base font-semibold text-white">All clear here!</h3>
-        <p class="text-sm text-slate-500">No issues match your current filters.</p>
+        <p class="text-sm text-slate-500">
+          No issues match your current filters.
+        </p>
       </div>
     {:else}
       <div class="divide-y divide-white/[0.06]">
         {#each filteredIssues as issue}
           {@const levelColors = getErrorLevelColor(issue.level)}
           {@const statusColors = getIssueStatusColor(issue.status)}
-          <Link to={getIssueUrl(issue)} class="group flex items-center gap-3 sm:gap-4 px-4 py-3.5 transition-all duration-200 hover:bg-white/[0.03]">
-            <div class="h-10 w-0.5 shrink-0 rounded-full transition-all duration-200 group-hover:w-1 {levelColors.dot}"></div>
+          <Link
+            to={getIssueUrl(issue)}
+            class="group flex items-center gap-3 sm:gap-4 px-4 py-3.5 transition-all duration-200 hover:bg-white/[0.03]"
+          >
+            <div
+              class="h-10 w-0.5 shrink-0 rounded-full transition-all duration-200 group-hover:w-1 {levelColors.dot}"
+            ></div>
 
             <div class="flex-1 min-w-0">
-              <div class="truncate text-xs font-semibold text-white group-hover:text-pulse-400 transition-colors leading-tight">
-                {issue.message || 'No message'}
+              <div
+                class="truncate text-xs font-semibold text-white group-hover:text-pulse-400 transition-colors leading-tight"
+              >
+                {issue.message || "No message"}
               </div>
-              <div class="mt-1 flex items-center gap-2 text-[9px] text-slate-500">
-                <span class="rounded px-1.5 py-0.5 text-xs font-bold uppercase tracking-tight {getStatusColorClass(issue.status)}">
-                  {statusColors.icon} {issue.status}
+              <div
+                class="mt-1 flex items-center gap-2 text-[9px] text-slate-500"
+              >
+                <span
+                  class="rounded px-1.5 py-0.5 text-xs font-bold uppercase tracking-tight {getStatusColorClass(
+                    issue.status,
+                  )}"
+                >
+                  {statusColors.icon}
+                  {issue.status}
                 </span>
-                <span class="font-medium text-slate-400">{issue.projectName}</span>
+                <span class="font-medium text-slate-400"
+                  >{issue.projectName}</span
+                >
                 {#if issue.environment}
-                  <span class="rounded bg-white/5 px-1.5 py-0.5">{issue.environment}</span>
+                  <span class="rounded bg-white/5 px-1.5 py-0.5"
+                    >{issue.environment}</span
+                  >
                 {/if}
                 <span>•</span>
                 <span>{formatDate(issue.created_at)}</span>
@@ -286,21 +339,38 @@
             <div class="hidden items-center gap-6 sm:flex">
               <div class="flex flex-col items-center">
                 <Zap size={12} class="mb-0.5 text-slate-600" />
-                <span class="text-[10px] font-bold text-white">{issue.eventCount}</span>
+                <span class="text-[10px] font-bold text-white"
+                  >{issue.eventCount}</span
+                >
               </div>
               <div class="flex flex-col items-center">
                 <Users size={12} class="mb-0.5 text-slate-600" />
-                <span class="text-[10px] font-bold text-white">{issue.userCount}</span>
+                <span class="text-[10px] font-bold text-white"
+                  >{issue.userCount}</span
+                >
               </div>
             </div>
 
             <div class="hidden w-24 sm:block">
-              <svg width="64" height="24" viewBox="0 0 64 24" class="text-pulse-600 opacity-30">
-                <path d="M0,24 L8,18 L16,22 L24,10 L32,15 L40,5 L48,20 L64,12" fill="none" stroke="currentColor" stroke-width="1.5" />
+              <svg
+                width="64"
+                height="24"
+                viewBox="0 0 64 24"
+                class="text-pulse-600 opacity-30"
+              >
+                <path
+                  d="M0,24 L8,18 L16,22 L24,10 L32,15 L40,5 L48,20 L64,12"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
               </svg>
             </div>
 
-            <ChevronRight size={18} class="text-slate-700 transition-transform group-hover:translate-x-1 group-hover:text-white" />
+            <ChevronRight
+              size={18}
+              class="text-slate-700 transition-transform group-hover:translate-x-1 group-hover:text-white"
+            />
           </Link>
         {/each}
       </div>
@@ -309,9 +379,16 @@
 
   <!-- Pagination -->
   {#if meta.total > meta.limit}
-    <div class="mt-8 flex items-center justify-between border-t border-white/10 pt-6">
+    <div
+      class="mt-8 flex items-center justify-between border-t border-white/10 pt-6"
+    >
       <div class="text-xs text-slate-500">
-        Showing <span class="font-semibold text-white">{meta.offset + 1}</span> to <span class="font-semibold text-white">{Math.min(meta.offset + meta.limit, meta.total)}</span> of <span class="font-semibold text-white">{meta.total}</span> results
+        Showing <span class="font-semibold text-white">{meta.offset + 1}</span>
+        to
+        <span class="font-semibold text-white"
+          >{Math.min(meta.offset + meta.limit, meta.total)}</span
+        >
+        of <span class="font-semibold text-white">{meta.total}</span> results
       </div>
       <div class="flex items-center gap-2">
         <button
@@ -332,4 +409,3 @@
     </div>
   {/if}
 </div>
-

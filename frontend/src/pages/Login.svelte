@@ -1,24 +1,25 @@
 <script>
-  import { navigate } from 'svelte-routing';
-  import { login } from '../stores/auth';
+  import { navigate } from "../lib/router";
+  import { login } from "../stores/auth";
 
-  let email = '';
-  let password = '';
-  let mfaCode = '';
-  let error = '';
+  let email = "";
+  let password = "";
+  let mfaCode = "";
+  let error = "";
   let loading = false;
   let mfaRequired = false;
-  let tempUserId = '';
+  let tempUserId = "";
 
-  async function handleLogin() {
+  async function handleLogin(e) {
+    if (e) e.preventDefault();
     loading = true;
-    error = '';
+    error = "";
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
@@ -28,38 +29,39 @@
           tempUserId = data.user_id;
         } else {
           login(data.token, data.user);
-          navigate('/', { replace: true });
+          navigate("/", { replace: true });
         }
       } else {
-        error = data.message || 'Invalid credentials';
+        error = data.message || "Invalid credentials";
       }
     } catch (e) {
-      error = 'Something went wrong';
+      error = "Something went wrong";
     } finally {
       loading = false;
     }
   }
 
-  async function handleMFAVerify() {
+  async function handleMFAVerify(e) {
+    if (e) e.preventDefault();
     loading = true;
-    error = '';
+    error = "";
 
     try {
-      const res = await fetch('/api/auth/mfa/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: tempUserId, code: mfaCode })
+      const res = await fetch("/api/auth/mfa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: tempUserId, code: mfaCode }),
       });
 
       const data = await res.json();
       if (res.ok) {
         login(data.token, data.user);
-        navigate('/', { replace: true });
+        navigate("/", { replace: true });
       } else {
-        error = 'Invalid verification code';
+        error = "Invalid verification code";
       }
     } catch (e) {
-      error = 'MFA verification failed';
+      error = "MFA verification failed";
     } finally {
       loading = false;
     }
@@ -77,7 +79,7 @@
 
     <div class="login-card">
       {#if !mfaRequired}
-        <form on:submit|preventDefault={handleLogin}>
+        <form onsubmit={handleLogin}>
           <h2>Welcome Back</h2>
           <p class="subtitle">Enter your credentials to access the dashboard</p>
 
@@ -116,9 +118,11 @@
           </button>
         </form>
       {:else}
-        <form on:submit|preventDefault={handleMFAVerify}>
+        <form onsubmit={handleMFAVerify}>
           <h2>Security Verification</h2>
-          <p class="subtitle">Enter the 6-digit code from your authenticator app</p>
+          <p class="subtitle">
+            Enter the 6-digit code from your authenticator app
+          </p>
 
           {#if error}
             <div class="error-alert">{error}</div>
@@ -148,7 +152,7 @@
           <button
             type="button"
             class="back-btn"
-            on:click={() => mfaRequired = false}
+            onclick={() => (mfaRequired = false)}
           >
             Back to Login
           </button>
@@ -177,8 +181,16 @@
     width: 100%;
     height: 100%;
     background:
-      radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 25%),
-      radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15) 0%, transparent 25%);
+      radial-gradient(
+        circle at 15% 50%,
+        rgba(99, 102, 241, 0.15) 0%,
+        transparent 25%
+      ),
+      radial-gradient(
+        circle at 85% 30%,
+        rgba(168, 85, 247, 0.15) 0%,
+        transparent 25%
+      );
     z-index: 1;
   }
 
@@ -285,7 +297,9 @@
     border-radius: 8px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.1s, opacity 0.2s;
+    transition:
+      transform 0.1s,
+      opacity 0.2s;
     margin-top: 1rem;
   }
 
@@ -346,6 +360,8 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
