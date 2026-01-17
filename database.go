@@ -147,6 +147,77 @@ func InitDB() (*sql.DB, error) {
 		FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 	);`
 
+	settingsTable := `
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	);`
+
+	securityPoliciesTable := `
+	CREATE TABLE IF NOT EXISTS security_policies (
+		project_id TEXT PRIMARY KEY,
+		ip_whitelist TEXT,
+		allowed_domains TEXT,
+		enforced BOOLEAN DEFAULT 0,
+		FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+	);`
+
+	coverageHistoryTable := `
+	CREATE TABLE IF NOT EXISTS coverage_history (
+		id TEXT PRIMARY KEY,
+		project_id TEXT,
+		percentage REAL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+	);`
+
+	fileCoverageSnapshotsTable := `
+	CREATE TABLE IF NOT EXISTS file_coverage_snapshots (
+		id TEXT PRIMARY KEY,
+		snapshot_id TEXT,
+		file_path TEXT,
+		percentage REAL,
+		FOREIGN KEY(snapshot_id) REFERENCES coverage_history(id) ON DELETE CASCADE
+	);`
+
+	apiKeyHistoryTable := `
+	CREATE TABLE IF NOT EXISTS api_key_history (
+		id TEXT PRIMARY KEY,
+		project_id TEXT,
+		api_key TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+	);`
+
+	monitorChecksTable := `
+	CREATE TABLE IF NOT EXISTS monitor_checks (
+		id TEXT PRIMARY KEY,
+		monitor_id TEXT,
+		status TEXT,
+		response_time INTEGER,
+		status_code INTEGER,
+		error_message TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY(monitor_id) REFERENCES monitors(id) ON DELETE CASCADE
+	);`
+
+	spansTable := `
+	CREATE TABLE IF NOT EXISTS spans (
+		id TEXT PRIMARY KEY,
+		project_id TEXT,
+		trace_id TEXT,
+		span_id TEXT,
+		parent_span_id TEXT,
+		name TEXT,
+		op TEXT,
+		description TEXT,
+		start_timestamp DATETIME,
+		timestamp DATETIME,
+		status TEXT,
+		data TEXT,
+		FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+	);`
+
 	_, err = db.Exec(projectsTable)
 	if err != nil {
 		return nil, err
@@ -168,6 +239,41 @@ func InitDB() (*sql.DB, error) {
 	}
 
 	_, err = db.Exec(projectSettingsTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(settingsTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(securityPoliciesTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(coverageHistoryTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(fileCoverageSnapshotsTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(apiKeyHistoryTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(monitorChecksTable)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(spansTable)
 	if err != nil {
 		return nil, err
 	}
@@ -330,8 +436,36 @@ func UpdateProjectQuota(db *sql.DB, id string, quota int) error {
 }
 
 func UpdateProjectCoverage(db *sql.DB, id string, coverage float64, files []FileCoverage) error {
-	_, err := db.Exec("UPDATE projects SET coverage = ?, coverage_updated_at = ? WHERE id = ?", coverage, time.Now(), id)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("UPDATE projects SET coverage = ?, coverage_updated_at = ? WHERE id = ?", coverage, time.Now(), id)
+	if err != nil {
+		return err
+	}
+
+	// Insert into coverage history
+	snapshotID := uuid.New().String()
+	_, err = tx.Exec("INSERT INTO coverage_history (id, project_id, percentage) VALUES (?, ?, ?)", snapshotID, id, coverage)
+	if err != nil {
+		return err
+	}
+
+	// Insert file snapshots if available
+	if len(files) > 0 {
+		for _, f := range files {
+			fID := uuid.New().String()
+			_, err = tx.Exec("INSERT INTO file_coverage_snapshots (id, snapshot_id, file_path, percentage) VALUES (?, ?, ?, ?)", fID, snapshotID, f.FilePath, f.Percentage)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
 func GetProjectFileCoverage(db *sql.DB, snapshotID string) ([]FileCoverage, error) {
