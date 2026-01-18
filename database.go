@@ -334,7 +334,7 @@ func InitDB() (*sql.DB, error) {
 	}
 
 	for _, indexSQL := range indexes {
-		if err := db.Exec(indexSQL); err != nil {
+		if _, err := db.Exec(indexSQL); err != nil {
 			log.Printf("Warning: Failed to create index: %v", err)
 		}
 	}
@@ -600,7 +600,6 @@ func GetErrorsLightweight(db *sql.DB, projectID string, limit int, cursor string
 	defer rows.Close()
 
 	var errors []ErrorEvent
-	var lastCreatedAt string
 	for rows.Next() {
 		var e ErrorEvent
 		err := rows.Scan(
@@ -1985,6 +1984,61 @@ func GetAllRootSpansLightweight(db *sql.DB, projectID, query string, limit int, 
 	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
 		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		err := rows.Scan(
+			&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
+			&s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data,
+		)
+		if err != nil {
+			return nil, "", false, err
+		}
+		spans = append(spans, s)
+	}
+
+	hasMore := len(spans) > limit
+	if hasMore {
+		spans = spans[:limit]
+	}
+
+	nextCursor := ""
+	if len(spans) > 0 {
+		nextCursor = spans[len(spans)-1].StartTimestamp.Format(time.RFC3339Nano)
+	}
+
+	return spans, nextCursor, hasMore, nil
+}
+
+func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]TraceSpan, error) {
+	sqlQuery := `
+		SELECT id, project_id, trace_id, span_id, parent_span_id,
+		       name, op, description, start_timestamp, timestamp, status, data
+		FROM spans
+		WHERE (parent_span_id IS NULL OR parent_span_id = '')`
+
+	args := []interface{}{}
+
+	if projectID != "" {
+		sqlQuery += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+
+	if query != "" {
+		sqlQuery += " AND (name LIKE ? OR op LIKE ? OR description LIKE ?)"
+		q := "%" + query + "%"
+		args = append(args, q, q, q)
+	}
+
+	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 
