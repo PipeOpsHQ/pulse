@@ -20,6 +20,9 @@ export function initSentry() {
     // Performance Monitoring
     tracesSampleRate: parseFloat(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE || '1.0'),
 
+    // Ensure stack traces include source context
+    attachStacktrace: true,
+
     // Session Replay (optional, can be disabled)
     replaysSessionSampleRate: 0.1, // 10% of sessions
     replaysOnErrorSampleRate: 1.0, // 100% of sessions with errors
