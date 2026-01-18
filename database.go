@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -667,8 +668,35 @@ func GetErrors(db *sql.DB, projectID string, limit, offset int, status string) (
 	return errors, total, nil
 }
 
+// normalizeUUID attempts to normalize UUID formats (with/without dashes)
+// Returns the original ID and an alternative format if applicable
+func normalizeUUID(id string) (string, string) {
+	// Remove dashes if present
+	noDashes := strings.ReplaceAll(id, "-", "")
+
+	// If it's 32 hex characters, try adding dashes in UUID format
+	if len(noDashes) == 32 {
+		withDashes := fmt.Sprintf("%s-%s-%s-%s-%s",
+			noDashes[0:8],
+			noDashes[8:12],
+			noDashes[12:16],
+			noDashes[16:20],
+			noDashes[20:32])
+		return id, withDashes
+	}
+
+	// If it has dashes and is a valid UUID length, try without dashes
+	if strings.Contains(id, "-") && len(strings.ReplaceAll(id, "-", "")) == 32 {
+		return id, noDashes
+	}
+
+	return id, ""
+}
+
 func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 	var e ErrorEvent
+
+	// Try the ID as-is first
 	err := db.QueryRow(
 		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
 		 FROM errors WHERE id = ?`,
@@ -678,6 +706,23 @@ func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 		&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
 		&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
 	)
+
+	// If not found and ID might be in different UUID format, try alternative
+	if err == sql.ErrNoRows {
+		_, altID := normalizeUUID(id)
+		if altID != "" && altID != id {
+			err = db.QueryRow(
+				`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
+				 FROM errors WHERE id = ?`,
+				altID,
+			).Scan(
+				&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+				&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+				&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
+			)
+		}
+	}
+
 	if err != nil {
 		return nil, err
 	}

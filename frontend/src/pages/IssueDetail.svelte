@@ -63,10 +63,14 @@
 
     if (path.includes("/issues/")) {
       const parts = path.split("/issues/");
-      if (parts.length > 1) errorId = parts[1];
+      if (parts.length > 1) {
+        errorId = parts[1].split("/")[0].trim(); // Take first part and trim whitespace
+      }
     } else if (path.includes("/errors/")) {
       const parts = path.split("/errors/");
-      if (parts.length > 1) errorId = parts[1];
+      if (parts.length > 1) {
+        errorId = parts[1].split("/")[0].trim(); // Take first part and trim whitespace
+      }
     }
 
     if (!errorId) {
@@ -81,61 +85,80 @@
     try {
       error = await api.get(`/errors/${errorId}`);
 
-      if (error) {
-        if (error.project_id) {
-          try {
-            project = await api.get(`/projects/${error.project_id}`);
-          } catch (e) {
-            console.error("Failed to load project:", e);
-          }
-        }
+      if (!error) {
+        error = null; // Ensure error is null if API returns null/undefined
+        return;
+      }
 
+      if (error.project_id) {
         try {
-          stacktrace = error.stacktrace
-            ? JSON.parse(error.stacktrace)
-            : { frames: [] };
+          project = await api.get(`/projects/${error.project_id}`);
         } catch (e) {
-          stacktrace = { frames: [] };
+          console.error("Failed to load project:", e);
         }
-        try {
-          context = error.context ? JSON.parse(error.context) : {};
-        } catch (e) {
-          context = {};
-        }
-        try {
-          user = error.user ? JSON.parse(error.user) : {};
-        } catch (e) {
-          user = {};
-        }
-        try {
-          tags = error.tags ? JSON.parse(error.tags) : {};
-        } catch (e) {
-          tags = {};
-        }
+      }
 
-        try {
-          occurrences = await api.get(`/errors/${errorId}/occurrences`);
-        } catch (e) {
-          console.error("Failed to load occurrences:", e);
-          occurrences = [error]; // fallback to the main error if fetch fails
+      try {
+        stacktrace = error.stacktrace
+          ? JSON.parse(error.stacktrace)
+          : { frames: [] };
+      } catch (e) {
+        stacktrace = { frames: [] };
+      }
+      try {
+        context = error.context ? JSON.parse(error.context) : {};
+      } catch (e) {
+        context = {};
+      }
+      try {
+        user = error.user ? JSON.parse(error.user) : {};
+      } catch (e) {
+        user = {};
+      }
+      try {
+        tags = error.tags ? JSON.parse(error.tags) : {};
+      } catch (e) {
+        tags = {};
+      }
+
+      try {
+        occurrences = await api.get(`/errors/${errorId}/occurrences`);
+        if (!Array.isArray(occurrences)) {
+          occurrences = [];
         }
+      } catch (e) {
+        console.error("Failed to load occurrences:", e);
+        occurrences = error ? [error] : []; // fallback to the main error if fetch fails
+      }
 
         // Load linked traces if error has trace_id
         if (error.trace_id || error.linked_traces_count > 0) {
           try {
             loadingTraces = true;
-            linkedTraces = await api.get(`/errors/${errorId}/traces`);
+            const traces = await api.get(`/errors/${errorId}/traces`);
+            linkedTraces = Array.isArray(traces) ? traces : [];
           } catch (e) {
             console.error("Failed to load linked traces:", e);
             linkedTraces = [];
           } finally {
             loadingTraces = false;
           }
+        } else {
+          linkedTraces = [];
         }
-      }
     } catch (err) {
       console.error("Failed to load error:", err);
-      toast.fromHttpError(err);
+      error = null; // Set error to null so "not found" UI is shown
+      linkedTraces = []; // Ensure linkedTraces is always an array
+      stacktrace = { frames: [] };
+      context = {};
+      user = {};
+      tags = {};
+      occurrences = [];
+      // Only show toast for non-404 errors
+      if (err.statusCode !== 404) {
+        toast.fromHttpError(err);
+      }
     } finally {
       loading = false;
     }
@@ -1042,7 +1065,7 @@
         </div>
 
         <!-- Linked Traces -->
-        {#if error.trace_id || linkedTraces.length > 0}
+        {#if error && (error.trace_id || (linkedTraces && linkedTraces.length > 0))}
           <div
             class="rounded-xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
           >
@@ -1059,11 +1082,11 @@
                   class="h-6 w-6 animate-spin rounded-full border-2 border-pulse-500 border-t-transparent"
                 ></div>
               </div>
-            {:else if linkedTraces.length > 0}
+            {:else if linkedTraces && linkedTraces.length > 0}
               <div class="space-y-3">
                 {#each linkedTraces as trace}
                   <Link
-                    to="/projects/{error.project_id}/traces/{trace.trace_id}"
+                    to="/projects/{error?.project_id || ''}/traces/{trace.trace_id}"
                     class="group block rounded-lg border border-white/10 bg-white/5 p-3 transition-all hover:bg-white/10 hover:border-pulse-500/30"
                   >
                     <div class="flex items-start justify-between gap-2">
