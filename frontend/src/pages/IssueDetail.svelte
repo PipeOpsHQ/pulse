@@ -279,7 +279,7 @@
               >
             </div>
             <h1
-              class="truncate text-lg font-semibold tracking-tight text-white leading-tight"
+              class="text-lg font-semibold tracking-tight text-white leading-tight break-words"
             >
               {error.message || "No message"}
             </h1>
@@ -515,6 +515,18 @@
                 <div
                   class="divide-y divide-white/[0.03] max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10"
                 >
+                  <!-- Error Message -->
+                  {#if error.message}
+                    <div class="px-4 py-3 bg-red-500/10 border-b border-red-500/20">
+                      <div class="flex items-start gap-2">
+                        <Terminal size={14} class="text-red-400 mt-0.5 shrink-0" />
+                        <div class="flex-1 min-w-0">
+                          <div class="text-xs font-bold text-red-400 uppercase tracking-wider mb-1">Error Message</div>
+                          <div class="text-sm text-white break-words font-mono">{error.message}</div>
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
                   {#each filteredFrames as frame, index}
                     {@const isExpanded = expandedFrames.has(index)}
                     {@const isInApp = frame.in_app !== false}
@@ -701,6 +713,18 @@
                 </div>
               {:else if stackTraceView === "tree"}
                 <div class="p-6">
+                  <!-- Error Message -->
+                  {#if error.message}
+                    <div class="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                      <div class="flex items-start gap-2">
+                        <Terminal size={14} class="text-red-400 mt-0.5 shrink-0" />
+                        <div class="flex-1 min-w-0">
+                          <div class="text-xs font-bold text-red-400 uppercase tracking-wider mb-1">Error Message</div>
+                          <div class="text-sm text-white break-words font-mono">{error.message}</div>
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
                   <div class="space-y-2">
                     {#each getFrames() || [] as frame, index}
                       {@const isInApp = frame.in_app !== false}
