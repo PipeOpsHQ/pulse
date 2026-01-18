@@ -3,7 +3,6 @@
   import { navigate } from "../lib/router";
   import Link from "../components/Link.svelte";
   import { Activity, Clock, ArrowRight, ChevronLeft, AlertCircle, ChevronRight } from "lucide-svelte";
-  import Link from "../components/Link.svelte";
   import { apiGet } from "../lib/api.js";
   import { toast } from "../stores/toast.js";
   import { getErrorLevelColor } from "../lib/statusColors";
