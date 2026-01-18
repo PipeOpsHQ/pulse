@@ -91,6 +91,13 @@
     p95Ms: timeSeries.map((t) => t.p95_ms),
     errors: timeSeries.map((t) => t.error_count),
   };
+
+  // Chart calculation helpers
+  $: maxCount = chartData.counts.length > 0 ? Math.max(...chartData.counts, 1) : 1;
+  $: maxMs = chartData.avgMs.length > 0 || chartData.p95Ms.length > 0
+    ? Math.max(...chartData.avgMs, ...chartData.p95Ms, 1)
+    : 1;
+  $: stepX = chartData.labels.length > 1 ? 800 / (chartData.labels.length - 1) : 800;
 </script>
 
 <div class="min-h-screen bg-[#050505] text-white p-4 md:p-8">
@@ -241,10 +248,6 @@
           </h2>
           <div class="h-64">
             <svg viewBox="0 0 800 200" class="w-full h-full">
-              {@const maxCount = Math.max(...chartData.counts, 1)}
-              {@const maxMs = Math.max(...chartData.avgMs, ...chartData.p95Ms, 1)}
-              {@const stepX = 800 / (chartData.labels.length - 1 || 1)}
-
               <!-- Grid lines -->
               {#each Array(5) as _, i}
                 {@const y = (i * 200) / 4}
