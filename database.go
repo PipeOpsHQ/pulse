@@ -611,7 +611,6 @@ func GetErrorsLightweight(db *sql.DB, projectID string, limit int, cursor string
 			return nil, "", false, err
 		}
 		errors = append(errors, e)
-		lastCreatedAt = e.CreatedAt.Format(time.RFC3339Nano)
 	}
 
 	hasMore := len(errors) > limit
