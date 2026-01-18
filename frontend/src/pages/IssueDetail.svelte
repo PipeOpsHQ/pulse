@@ -41,6 +41,8 @@
   let expandedFrames = new Set();
   let showFullStacktrace = false;
   let occurrences = [];
+  let linkedTraces = [];
+  let loadingTraces = false;
 
   function toggleFrame(index) {
     if (expandedFrames.has(index)) {
@@ -116,6 +118,19 @@
         } catch (e) {
           console.error("Failed to load occurrences:", e);
           occurrences = [error]; // fallback to the main error if fetch fails
+        }
+
+        // Load linked traces if error has trace_id
+        if (error.trace_id || error.linked_traces_count > 0) {
+          try {
+            loadingTraces = true;
+            linkedTraces = await api.get(`/errors/${errorId}/traces`);
+          } catch (e) {
+            console.error("Failed to load linked traces:", e);
+            linkedTraces = [];
+          } finally {
+            loadingTraces = false;
+          }
         }
       }
     } catch (err) {
@@ -1025,6 +1040,69 @@
             </div>
           </div>
         </div>
+
+        <!-- Linked Traces -->
+        {#if error.trace_id || linkedTraces.length > 0}
+          <div
+            class="rounded-xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
+          >
+            <h3
+              class="mb-6 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400"
+            >
+              <Activity size={14} />
+              <span>Linked Traces</span>
+            </h3>
+
+            {#if loadingTraces}
+              <div class="flex items-center justify-center py-4">
+                <div
+                  class="h-6 w-6 animate-spin rounded-full border-2 border-pulse-500 border-t-transparent"
+                ></div>
+              </div>
+            {:else if linkedTraces.length > 0}
+              <div class="space-y-3">
+                {#each linkedTraces as trace}
+                  <Link
+                    to="/projects/{error.project_id}/traces/{trace.trace_id}"
+                    class="group block rounded-lg border border-white/10 bg-white/5 p-3 transition-all hover:bg-white/10 hover:border-pulse-500/30"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0 flex-1">
+                        <div class="mb-1 truncate text-sm font-semibold text-white">
+                          {trace.name || trace.description || "Untitled Trace"}
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-slate-400">
+                          {#if trace.op}
+                            <span class="font-mono">{trace.op}</span>
+                          {/if}
+                          {#if trace.start_timestamp && trace.timestamp}
+                            {@const duration = new Date(trace.timestamp) - new Date(trace.start_timestamp)}
+                            <span>{duration}ms</span>
+                          {/if}
+                          {#if trace.status}
+                            <span
+                              class="rounded px-1.5 py-0.5 text-[10px] font-bold {trace.status === 'ok' ? 'bg-green-500/20 text-green-400' : trace.status === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}"
+                            >
+                              {trace.status}
+                            </span>
+                          {/if}
+                        </div>
+                      </div>
+                      <ChevronRightIcon
+                        size={16}
+                        class="text-slate-600 transition-transform group-hover:translate-x-1 group-hover:text-pulse-400"
+                      />
+                    </div>
+                  </Link>
+                {/each}
+              </div>
+            {:else}
+              <div class="py-4 text-center text-xs text-slate-500">
+                No linked traces found
+              </div>
+            {/if}
+          </div>
+        {/if}
 
         <!-- Infrastructure Meta -->
         <div

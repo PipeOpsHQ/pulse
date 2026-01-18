@@ -6,10 +6,133 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// Batch inserter for errors
+type ErrorBatch struct {
+	Event   *ErrorEvent
+	Project *Project
+}
+
+var (
+	errorBatchChan  = make(chan ErrorBatch, 1000)
+	batchMutex      sync.Mutex
+	pendingErrors   []ErrorBatch
+	lastBatchTime   time.Time
+	batchSize       = 100
+	batchInterval   = 100 * time.Millisecond
+)
+
+func StartErrorBatchInserter(db *sql.DB) {
+	log.Println("Starting error batch inserter...")
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case errorBatch := <-errorBatchChan:
+			batchMutex.Lock()
+			pendingErrors = append(pendingErrors, errorBatch)
+			shouldFlush := len(pendingErrors) >= batchSize
+			batchMutex.Unlock()
+
+			if shouldFlush {
+				flushErrorBatch(db)
+			}
+		case <-ticker.C:
+			batchMutex.Lock()
+			shouldFlush := len(pendingErrors) > 0 && time.Since(lastBatchTime) > batchInterval
+			batchMutex.Unlock()
+
+			if shouldFlush {
+				flushErrorBatch(db)
+			}
+		}
+	}
+}
+
+func flushErrorBatch(db *sql.DB) {
+	batchMutex.Lock()
+	if len(pendingErrors) == 0 {
+		batchMutex.Unlock()
+		return
+	}
+
+	errorsToInsert := make([]ErrorBatch, len(pendingErrors))
+	copy(errorsToInsert, pendingErrors)
+	pendingErrors = pendingErrors[:0]
+	lastBatchTime = time.Now()
+	batchMutex.Unlock()
+
+	if len(errorsToInsert) == 0 {
+		return
+	}
+
+	// Batch insert errors
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Failed to begin batch transaction: %v", err)
+		// Fallback to individual inserts
+		for _, eb := range errorsToInsert {
+			InsertError(db, eb.Event)
+		}
+		return
+	}
+
+	stmt, err := tx.Prepare(`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		log.Printf("Failed to prepare batch statement: %v", err)
+		// Fallback to individual inserts
+		for _, eb := range errorsToInsert {
+			InsertError(db, eb.Event)
+		}
+		return
+	}
+	defer stmt.Close()
+
+	projectCounts := make(map[string]int)
+	for _, eb := range errorsToInsert {
+		_, err := stmt.Exec(
+			eb.Event.ID, eb.Event.ProjectID, eb.Event.Message, eb.Event.Level, eb.Event.Environment,
+			eb.Event.Release, eb.Event.Platform, eb.Event.Timestamp, eb.Event.Stacktrace, eb.Event.Context,
+			eb.Event.User, eb.Event.Tags, eb.Event.Status, eb.Event.TraceID, eb.Event.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Failed to insert error in batch: %v", err)
+			continue
+		}
+		projectCounts[eb.Event.ProjectID]++
+
+		// Trigger notifications asynchronously
+		if eb.Project != nil {
+			go triggerNotifications(db, eb.Project, eb.Event)
+		}
+	}
+
+	// Batch update project counters
+	for projectID, count := range projectCounts {
+		_, err := tx.Exec("UPDATE projects SET current_month_events = current_month_events + ? WHERE id = ?", count, projectID)
+		if err != nil {
+			log.Printf("Failed to update project counter for %s: %v", projectID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed to commit batch transaction: %v", err)
+		// Fallback to individual inserts
+		for _, eb := range errorsToInsert {
+			InsertError(db, eb.Event)
+		}
+		return
+	}
+
+	log.Printf("Batch inserted %d errors for %d projects", len(errorsToInsert), len(projectCounts))
+}
 
 func StartMonitorWorker(db *sql.DB) {
 	log.Println("Starting uptime monitor worker...")

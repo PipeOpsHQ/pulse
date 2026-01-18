@@ -24,8 +24,9 @@
   let sortBy = "lastSeen";
   let searchQuery = "";
   let selectedProjectId = "";
-  let meta = { total: 0, limit: 50, offset: 0 };
+  let meta = { limit: 50, cursor: "", has_more: false };
   let filteredIssues = [];
+  let nextCursor = "";
 
   const tabs = [
     { id: "unresolved", label: "Unresolved", icon: Inbox },
@@ -38,23 +39,23 @@
   // Refresh data when page becomes visible (e.g., returning from issue detail)
   function visibilityHandler() {
     if (!document.hidden) {
-      loadIssues(meta.offset, false); // Background refresh
+      loadIssues("", false); // Background refresh, reset cursor
     }
   }
 
   onMount(async () => {
     await Promise.all([
       loadProjects(),
-      loadIssues(0, true), // Initial load
+      loadIssues("", true), // Initial load, empty cursor
     ]);
     document.addEventListener("visibilitychange", visibilityHandler);
 
-    // Set up real-time polling every 10 seconds
+    // Set up real-time polling every 30 seconds (optimized from 10s)
     refreshInterval = setInterval(() => {
       if (!document.hidden) {
-        loadIssues(meta.offset, false); // Background refresh, no loading state
+        loadIssues("", false); // Background refresh, reset cursor
       }
-    }, 10000);
+    }, 30000);
   });
 
   onDestroy(() => {
@@ -74,22 +75,28 @@
     }
   }
 
-  async function loadIssues(offset = 0, showLoading = false) {
+  async function loadIssues(cursor = "", showLoading = false) {
     if (showLoading) {
       loading = true;
     }
     try {
       const status = activeTab === "unresolved" ? "unresolved" : activeTab;
-      let url = `/errors?status=${status}&limit=50&offset=${offset}`;
+      let url = `/errors?status=${status}&limit=50&use_cursor=true`;
+      if (cursor) {
+        url += `&cursor=${encodeURIComponent(cursor)}`;
+      }
       if (selectedProjectId) {
         url += `&projectId=${selectedProjectId}`;
       }
-      const response = await api.get(url);
+      const response = await api.get(url, { ttl: 5000 }); // Cache for 5 seconds
 
       const rawIssues = response?.data || response || [];
-      meta = response?.meta || { total: 0, limit: 50, offset: 0 };
+      meta = response?.meta || { limit: 50, cursor: "", has_more: false };
+      nextCursor = meta.cursor || "";
+      const hasMore = meta.has_more || false;
 
-      issues = Array.isArray(rawIssues)
+      // If loading with cursor (pagination), append to existing issues
+      const newIssues = Array.isArray(rawIssues)
         ? rawIssues.map((issue) => {
             const project = projects.find((p) => p.id === issue.project_id);
             return {
@@ -101,6 +108,14 @@
             };
           })
         : [];
+
+      // If cursor is empty, replace issues (new load or refresh)
+      // If cursor exists, append (load more)
+      if (!cursor) {
+        issues = newIssues;
+      } else {
+        issues = [...issues, ...newIssues];
+      }
     } catch (error) {
       console.error("Failed to load issues:", error);
     } finally {
@@ -112,15 +127,21 @@
 
   function handleTabChange(tabId) {
     activeTab = tabId;
-    loadIssues(0);
+    issues = [];
+    nextCursor = "";
+    loadIssues("", true);
   }
 
-  function handlePageChange(newOffset) {
-    loadIssues(newOffset);
+  function handleLoadMore() {
+    if (nextCursor && !loading) {
+      loadIssues(nextCursor, false);
+    }
   }
 
   function handleProjectChange() {
-    loadIssues(0);
+    issues = [];
+    nextCursor = "";
+    loadIssues("", true);
   }
 
   // Filter and sort issues reactively
@@ -377,25 +398,14 @@
     {/if}
   </div>
 
-  <!-- Pagination -->
-  {#if meta.total > meta.limit}
-    <div
-      class="mt-8 flex items-center justify-between border-t border-white/10 pt-6"
-    >
-      <div class="text-xs text-slate-500">
-        Showing <span class="font-semibold text-white">{meta.offset + 1}</span>
-        to
-        <span class="font-semibold text-white"
-          >{Math.min(meta.offset + meta.limit, meta.total)}</span
-        >
-        of <span class="font-semibold text-white">{meta.total}</span> results
-      </div>
-      <div class="flex items-center gap-2">
-        <button
-          class="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition-all hover:bg-white/10 hover:text-white disabled:opacity-30"
-          disabled={meta.offset === 0}
-          on:click={() => handlePageChange(meta.offset - meta.limit)}
-        >
+  <!-- Load More Button (Cursor-based pagination) -->
+  {#if nextCursor && meta.has_more}
+    <div class="mt-8 flex items-center justify-center border-t border-white/10 pt-6">
+      <button
+        class="rounded-lg border border-white/10 bg-white/5 px-6 py-2 text-sm text-slate-400 transition-all hover:bg-white/10 hover:text-white disabled:opacity-30"
+        disabled={loading}
+        on:click={handleLoadMore}
+      >
           <ChevronLeft size={20} />
         </button>
         <button
@@ -403,9 +413,8 @@
           disabled={meta.offset + meta.limit >= meta.total}
           on:click={() => handlePageChange(meta.offset + meta.limit)}
         >
-          <ChevronRight size={20} />
+          {loading ? "Loading..." : "Load More"}
         </button>
-      </div>
     </div>
   {/if}
 </div>

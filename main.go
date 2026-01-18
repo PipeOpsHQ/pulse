@@ -1,6 +1,8 @@
 package main
 
 import (
+	"compress/gzip"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -64,6 +66,9 @@ func main() {
 
 	// CORS middleware
 	r.Use(corsMiddleware)
+
+	// Gzip compression middleware
+	r.Use(gzipMiddleware)
 
 	// Public routes
 	r.HandleFunc("/api/health", healthCheck).Methods("GET", "OPTIONS")
@@ -219,6 +224,9 @@ func main() {
 	api.HandleFunc("/projects/{projectId}/traces/{traceId}", func(w http.ResponseWriter, r *http.Request) {
 		getTraceDetails(w, r, db)
 	}).Methods("GET", "OPTIONS")
+	api.HandleFunc("/traces/{traceId}/errors", func(w http.ResponseWriter, r *http.Request) {
+		getTraceErrors(w, r, db)
+	}).Methods("GET", "OPTIONS")
 
 	// Global traces endpoint
 	api.HandleFunc("/traces", func(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +238,9 @@ func main() {
 	}).Methods("GET", "OPTIONS")
 	api.HandleFunc("/errors/{id}/occurrences", func(w http.ResponseWriter, r *http.Request) {
 		getErrorOccurrences(w, r, db)
+	}).Methods("GET", "OPTIONS")
+	api.HandleFunc("/errors/{errorId}/traces", func(w http.ResponseWriter, r *http.Request) {
+		getErrorTraces(w, r, db)
 	}).Methods("GET", "OPTIONS")
 
 	api.HandleFunc("/errors/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +339,7 @@ func main() {
 
 	// Start background workers
 	go StartMonitorWorker(db)
+	go StartErrorBatchInserter(db)
 
 	log.Printf("Pulse OSS starting on port %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
@@ -346,6 +358,47 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip compression for ingestion endpoints (they're write-only)
+		if strings.HasPrefix(r.URL.Path, "/api/") && (strings.Contains(r.URL.Path, "/store") || strings.Contains(r.URL.Path, "/envelope")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check if client accepts gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Create gzip writer
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+
+		// Wrap response writer
+		gzw := &gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		next.ServeHTTP(gzw, r)
+	})
+}
+
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func (w *gzipResponseWriter) WriteHeader(statusCode int) {
+	w.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(statusCode)
 }
 
 // getEnvOrDefault returns the environment variable value or a default

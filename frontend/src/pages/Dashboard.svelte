@@ -44,12 +44,12 @@
     await loadData(true); // Initial load
     document.addEventListener("visibilitychange", visibilityHandler);
 
-    // Set up real-time polling every 10 seconds
+    // Set up real-time polling every 30 seconds (optimized from 10s)
     refreshInterval = setInterval(() => {
       if (!document.hidden) {
         loadData(false); // Background refresh, no loading state
       }
-    }, 10000);
+    }, 30000);
   });
 
   onDestroy(() => {
@@ -72,9 +72,9 @@
     try {
       const [projectsResponse, errorsResponse, insightsResponse] =
         await Promise.all([
-          api.get("/projects"),
-          api.get("/errors?limit=20"),
-          api.get("/insights?range=24h"),
+          api.get("/projects", { ttl: 30000 }), // Cache for 30 seconds
+          api.get("/errors?limit=20&use_cursor=true", { ttl: 10000 }), // Cache for 10 seconds
+          api.get("/insights?range=24h", { ttl: 30000 }), // Cache for 30 seconds
         ]);
 
       projects = Array.isArray(projectsResponse)

@@ -2,14 +2,18 @@
   import { onMount } from "svelte";
   import { navigate } from "../lib/router";
   import Link from "../components/Link.svelte";
-  import { Activity, Clock, ArrowRight, ChevronLeft } from "lucide-svelte";
+  import { Activity, Clock, ArrowRight, ChevronLeft, AlertCircle, ChevronRight } from "lucide-svelte";
+  import Link from "../components/Link.svelte";
   import { apiGet } from "../lib/api.js";
   import { toast } from "../stores/toast.js";
+  import { getErrorLevelColor } from "../lib/statusColors";
 
   let spans = [];
   let loading = true;
   let projectId = "";
   let traceId = "";
+  let linkedErrors = [];
+  let loadingErrors = false;
 
   onMount(async () => {
     // Get project ID and trace ID from URL
@@ -28,6 +32,17 @@
     try {
       const data = await apiGet(`/projects/${projectId}/traces/${traceId}`);
       spans = data || [];
+
+      // Load linked errors
+      try {
+        loadingErrors = true;
+        linkedErrors = await apiGet(`/traces/${traceId}/errors`);
+      } catch (e) {
+        console.error("Failed to load linked errors:", e);
+        linkedErrors = [];
+      } finally {
+        loadingErrors = false;
+      }
     } catch (error) {
       console.error("Failed to load trace details:", error);
       toast.error("Failed to load trace details");
@@ -132,7 +147,73 @@
         <p class="text-slate-400">No spans found for this trace</p>
       </div>
     {:else}
-      <div class="space-y-4">
+      <div class="space-y-6">
+        <!-- Linked Errors Section -->
+        {#if linkedErrors.length > 0 || loadingErrors}
+          <div class="pulse-card p-6">
+            <h2 class="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <AlertCircle size={18} class="text-red-400" />
+              Linked Errors ({linkedErrors.length})
+            </h2>
+
+            {#if loadingErrors}
+              <div class="flex items-center justify-center py-4">
+                <div
+                  class="h-6 w-6 animate-spin rounded-full border-2 border-pulse-500 border-t-transparent"
+                ></div>
+              </div>
+            {:else if linkedErrors.length > 0}
+              <div class="space-y-3">
+                {#each linkedErrors as error}
+                  <Link
+                    to="/errors/{error.id}"
+                    class="group block rounded-lg border border-white/10 bg-white/5 p-4 transition-all hover:bg-white/10 hover:border-red-500/30"
+                  >
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0 flex-1">
+                        <div class="mb-2 flex items-center gap-2">
+                          {#if error.level}
+                            {@const levelColors = getErrorLevelColor(error.level)}
+                            <span
+                              class="rounded px-2 py-0.5 text-[10px] font-bold uppercase {levelColors.bg} {levelColors.text} {levelColors.border} border"
+                            >
+                              {error.level}
+                            </span>
+                          {/if}
+                          {#if error.status}
+                            <span
+                              class="rounded px-2 py-0.5 text-[10px] font-bold uppercase {error.status === 'resolved' ? 'bg-green-500/20 text-green-400' : error.status === 'ignored' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}"
+                            >
+                              {error.status}
+                            </span>
+                          {/if}
+                        </div>
+                        <div class="mb-1 truncate text-sm font-semibold text-white">
+                          {error.message || "No message"}
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-slate-400">
+                          {#if error.environment}
+                            <span>{error.environment}</span>
+                          {/if}
+                          {#if error.timestamp}
+                            <span>{formatDate(error.timestamp)}</span>
+                          {/if}
+                        </div>
+                      </div>
+                      <ChevronRight
+                        size={18}
+                        class="text-slate-600 transition-transform group-hover:translate-x-1 group-hover:text-red-400 flex-shrink-0"
+                      />
+                    </div>
+                  </Link>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Trace Spans -->
+        <div class="space-y-4">
         {#each spanTree as rootSpan}
           <div class="pulse-card p-6">
             <div class="mb-4">
@@ -249,6 +330,7 @@
             {/if}
           </div>
         {/each}
+        </div>
       </div>
     {/if}
   </div>

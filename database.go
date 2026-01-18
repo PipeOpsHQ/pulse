@@ -48,6 +48,7 @@ type ErrorEvent struct {
 	User        string    `json:"user"`
 	Tags        string    `json:"tags"`
 	Status      string    `json:"status"`
+	TraceID     string    `json:"trace_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -307,6 +308,41 @@ func InitDB() (*sql.DB, error) {
 	db.Exec("ALTER TABLE projects ADD COLUMN coverage REAL DEFAULT 0;")
 	db.Exec("ALTER TABLE projects ADD COLUMN coverage_updated_at DATETIME;")
 	db.Exec("ALTER TABLE monitors ADD COLUMN timeout INTEGER DEFAULT 30;")
+	db.Exec("ALTER TABLE errors ADD COLUMN trace_id TEXT;")
+
+	// SQLite Performance Optimizations
+	db.Exec("PRAGMA journal_mode = WAL;")
+	db.Exec("PRAGMA synchronous = NORMAL;")
+	db.Exec("PRAGMA cache_size = -64000;") // 64MB
+	db.Exec("PRAGMA temp_store = MEMORY;")
+	db.Exec("PRAGMA mmap_size = 268435456;") // 256MB
+	db.Exec("PRAGMA foreign_keys = ON;")
+
+	// Create indexes for performance
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_errors_project_created ON errors(project_id, created_at DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_project_status ON errors(project_id, status);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_timestamp ON errors(timestamp);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_created_at ON errors(created_at DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_trace_id ON errors(trace_id);",
+		"CREATE INDEX IF NOT EXISTS idx_spans_project_timestamp ON spans(project_id, start_timestamp DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);",
+		"CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans(parent_span_id);",
+		"CREATE INDEX IF NOT EXISTS idx_spans_start_timestamp ON spans(start_timestamp DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_monitor_checks_monitor_created ON monitor_checks(monitor_id, created_at DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_coverage_history_project_created ON coverage_history(project_id, created_at DESC);",
+	}
+
+	for _, indexSQL := range indexes {
+		if err := db.Exec(indexSQL); err != nil {
+			log.Printf("Warning: Failed to create index: %v", err)
+		}
+	}
+
+	// Configure connection pool
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	// Seed admin user
 	if err := seedAdminUser(db); err != nil {
@@ -520,11 +556,11 @@ func InsertError(db *sql.DB, event *ErrorEvent) error {
 	defer tx.Rollback()
 
 	_, err = tx.Exec(
-		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.ProjectID, event.Message, event.Level, event.Environment,
 		event.Release, event.Platform, event.Timestamp, event.Stacktrace, event.Context,
-		event.User, event.Tags, event.Status, event.CreatedAt,
+		event.User, event.Tags, event.Status, event.TraceID, event.CreatedAt,
 	)
 	if err != nil {
 		return err
@@ -536,6 +572,60 @@ func InsertError(db *sql.DB, event *ErrorEvent) error {
 	}
 
 	return tx.Commit()
+}
+
+// GetErrorsLightweight returns errors without stacktrace and context fields for list views
+func GetErrorsLightweight(db *sql.DB, projectID string, limit int, cursor string, status string) ([]ErrorEvent, string, bool, error) {
+	baseQuery := "FROM errors WHERE project_id = ?"
+	args := []interface{}{projectID}
+
+	if status != "" {
+		baseQuery += " AND status = ?"
+		args = append(args, status)
+	}
+
+	// Cursor-based pagination
+	if cursor != "" {
+		baseQuery += " AND created_at < ?"
+		args = append(args, cursor)
+	}
+
+	selectQuery := `SELECT id, project_id, message, level, environment, release, platform, timestamp, '', '', user, tags, status, created_at ` + baseQuery + " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit+1) // Fetch one extra to check if there's more
+
+	rows, err := db.Query(selectQuery, args...)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	var errors []ErrorEvent
+	var lastCreatedAt string
+	for rows.Next() {
+		var e ErrorEvent
+		err := rows.Scan(
+			&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+			&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+			&e.User, &e.Tags, &e.Status, &e.CreatedAt,
+		)
+		if err != nil {
+			return nil, "", false, err
+		}
+		errors = append(errors, e)
+		lastCreatedAt = e.CreatedAt.Format(time.RFC3339Nano)
+	}
+
+	hasMore := len(errors) > limit
+	if hasMore {
+		errors = errors[:limit]
+	}
+
+	nextCursor := ""
+	if len(errors) > 0 {
+		nextCursor = errors[len(errors)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+
+	return errors, nextCursor, hasMore, nil
 }
 
 func GetErrors(db *sql.DB, projectID string, limit, offset int, status string) ([]ErrorEvent, int, error) {
@@ -582,13 +672,13 @@ func GetErrors(db *sql.DB, projectID string, limit, offset int, status string) (
 func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 	var e ErrorEvent
 	err := db.QueryRow(
-		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, created_at
+		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
 		 FROM errors WHERE id = ?`,
 		id,
 	).Scan(
 		&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
 		&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
-		&e.User, &e.Tags, &e.Status, &e.CreatedAt,
+		&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -635,23 +725,31 @@ func GetErrorWithStats(db *sql.DB, id string) (map[string]interface{}, error) {
 	}
 	userCount := len(userSet)
 
+	// Get linked traces count
+	var linkedTracesCount int
+	if e.TraceID != "" {
+		db.QueryRow("SELECT COUNT(DISTINCT trace_id) FROM spans WHERE trace_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')", e.TraceID).Scan(&linkedTracesCount)
+	}
+
 	return map[string]interface{}{
-		"id":          e.ID,
-		"project_id":  e.ProjectID,
-		"message":     e.Message,
-		"level":       e.Level,
-		"environment": e.Environment,
-		"release":     e.Release,
-		"platform":    e.Platform,
-		"timestamp":   e.Timestamp,
-		"stacktrace":  e.Stacktrace,
-		"context":     e.Context,
-		"user":        e.User,
-		"tags":        e.Tags,
-		"status":      e.Status,
-		"created_at":  e.CreatedAt,
-		"event_count": eventCount,
-		"user_count":  userCount,
+		"id":                 e.ID,
+		"project_id":         e.ProjectID,
+		"message":            e.Message,
+		"level":              e.Level,
+		"environment":        e.Environment,
+		"release":            e.Release,
+		"platform":           e.Platform,
+		"timestamp":          e.Timestamp,
+		"stacktrace":         e.Stacktrace,
+		"context":            e.Context,
+		"user":               e.User,
+		"tags":               e.Tags,
+		"status":             e.Status,
+		"trace_id":           e.TraceID,
+		"linked_traces_count": linkedTracesCount,
+		"created_at":         e.CreatedAt,
+		"event_count":        eventCount,
+		"user_count":         userCount,
 	}, nil
 }
 
@@ -690,6 +788,145 @@ func DeleteError(db *sql.DB, id string) error {
 func UpdateErrorStatus(db *sql.DB, id string, status string) error {
 	_, err := db.Exec("UPDATE errors SET status = ? WHERE id = ?", status, id)
 	return err
+}
+
+// GetErrorsWithStatsLightweight returns errors with stats but without stacktrace/context for list views
+func GetErrorsWithStatsLightweight(db *sql.DB, projectID string, limit int, cursor string, status string) ([]map[string]interface{}, string, bool, error) {
+	baseQuery := "FROM errors WHERE project_id = ?"
+	args := []interface{}{projectID}
+
+	if status != "" {
+		baseQuery += " AND status = ?"
+		args = append(args, status)
+	}
+
+	// Cursor-based pagination
+	if cursor != "" {
+		baseQuery += " AND created_at < ?"
+		args = append(args, cursor)
+	}
+
+	// Exclude stacktrace and context for list views
+	selectQuery := `SELECT id, project_id, message, level, environment, release, platform, timestamp, '', '', user, tags, status, created_at ` + baseQuery + " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit+1) // Fetch one extra to check if there's more
+
+	rows, err := db.Query(selectQuery, args...)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	var errors []ErrorEvent
+	for rows.Next() {
+		var e ErrorEvent
+		err := rows.Scan(
+			&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+			&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+			&e.User, &e.Tags, &e.Status, &e.CreatedAt,
+		)
+		if err != nil {
+			return nil, "", false, err
+		}
+		errors = append(errors, e)
+	}
+
+	hasMore := len(errors) > limit
+	if hasMore {
+		errors = errors[:limit]
+	}
+
+	// Batch calculate stats for all messages
+	messageSet := make(map[string]bool)
+	for _, e := range errors {
+		messageSet[e.Message] = true
+	}
+
+	// Get event counts for all messages in one query
+	eventCounts := make(map[string]int)
+	if len(messageSet) > 0 {
+		messages := make([]interface{}, 0, len(messageSet))
+		for msg := range messageSet {
+			messages = append(messages, msg)
+		}
+		placeholders := strings.Repeat("?,", len(messages))
+		placeholders = placeholders[:len(placeholders)-1]
+
+		query := "SELECT message, COUNT(*) FROM errors WHERE project_id = ? AND message IN (" + placeholders + ")"
+		queryArgs := []interface{}{projectID}
+		queryArgs = append(queryArgs, messages...)
+		if status != "" {
+			query += " AND status = ?"
+			queryArgs = append(queryArgs, status)
+		}
+		query += " GROUP BY message"
+
+		statsRows, _ := db.Query(query, queryArgs...)
+		if statsRows != nil {
+			defer statsRows.Close()
+			for statsRows.Next() {
+				var msg string
+				var count int
+				if err := statsRows.Scan(&msg, &count); err == nil {
+					eventCounts[msg] = count
+				}
+			}
+		}
+	}
+
+	// Get user counts (simplified - count distinct user JSON strings)
+	userCounts := make(map[string]int)
+	if len(messageSet) > 0 {
+		messages := make([]interface{}, 0, len(messageSet))
+		for msg := range messageSet {
+			messages = append(messages, msg)
+		}
+		placeholders := strings.Repeat("?,", len(messages))
+		placeholders = placeholders[:len(placeholders)-1]
+
+		query := "SELECT message, COUNT(DISTINCT user) FROM errors WHERE project_id = ? AND message IN (" + placeholders + ") AND user IS NOT NULL AND user != '' GROUP BY message"
+		queryArgs := []interface{}{projectID}
+		queryArgs = append(queryArgs, messages...)
+
+		userRows, _ := db.Query(query, queryArgs...)
+		if userRows != nil {
+			defer userRows.Close()
+			for userRows.Next() {
+				var msg string
+				var count int
+				if err := userRows.Scan(&msg, &count); err == nil {
+					userCounts[msg] = count
+				}
+			}
+		}
+	}
+
+	result := make([]map[string]interface{}, 0, len(errors))
+	for _, e := range errors {
+		errorMap := map[string]interface{}{
+			"id":          e.ID,
+			"project_id":  e.ProjectID,
+			"message":     e.Message,
+			"level":       e.Level,
+			"environment": e.Environment,
+			"release":     e.Release,
+			"platform":    e.Platform,
+			"timestamp":   e.Timestamp,
+			"user":        e.User,
+			"tags":        e.Tags,
+			"status":      e.Status,
+			"created_at":  e.CreatedAt,
+			"event_count": eventCounts[e.Message],
+			"user_count":  userCounts[e.Message],
+		}
+		result = append(result, errorMap)
+	}
+
+	nextCursor := ""
+	if len(errors) > 0 {
+		nextCursor = errors[len(errors)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+
+	return result, nextCursor, hasMore, nil
 }
 
 func GetErrorsWithStats(db *sql.DB, projectID string, limit, offset int, status string) ([]map[string]interface{}, int, error) {
@@ -925,6 +1162,63 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 	return stats, nil
 }
 
+// GetProjectRootSpansLightweight returns spans with cursor-based pagination
+func GetProjectRootSpansLightweight(db *sql.DB, projectID string, query string, limit int, cursor string) ([]TraceSpan, string, bool, error) {
+	sqlQuery := `
+		SELECT id, project_id, trace_id, span_id, parent_span_id,
+		       name, op, description, start_timestamp, timestamp, status, data
+		FROM spans
+		WHERE project_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')`
+
+	args := []interface{}{projectID}
+
+	if query != "" {
+		sqlQuery += " AND (name LIKE ? OR op LIKE ? OR description LIKE ?)"
+		q := "%" + query + "%"
+		args = append(args, q, q, q)
+	}
+
+	// Cursor-based pagination
+	if cursor != "" {
+		sqlQuery += " AND start_timestamp < ?"
+		args = append(args, cursor)
+	}
+
+	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ?"
+	args = append(args, limit+1) // Fetch one extra to check if there's more
+
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		err := rows.Scan(
+			&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
+			&s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data,
+		)
+		if err != nil {
+			return nil, "", false, err
+		}
+		spans = append(spans, s)
+	}
+
+	hasMore := len(spans) > limit
+	if hasMore {
+		spans = spans[:limit]
+	}
+
+	nextCursor := ""
+	if len(spans) > 0 {
+		nextCursor = spans[len(spans)-1].StartTimestamp.Format(time.RFC3339Nano)
+	}
+
+	return spans, nextCursor, hasMore, nil
+}
+
 func GetProjectRootSpans(db *sql.DB, projectID string, query string, limit, offset int) ([]TraceSpan, error) {
 	sqlQuery := `
 		SELECT id, project_id, trace_id, span_id, parent_span_id,
@@ -987,6 +1281,92 @@ func GetTraceSpans(db *sql.DB, traceID string) ([]TraceSpan, error) {
 		spans = append(spans, s)
 	}
 	return spans, nil
+}
+
+// GetTracesForError returns all traces (root spans) linked to an error via trace_id
+func GetTracesForError(db *sql.DB, errorID string) ([]TraceSpan, error) {
+	// First get the error's trace_id
+	var traceID string
+	err := db.QueryRow("SELECT trace_id FROM errors WHERE id = ?", errorID).Scan(&traceID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []TraceSpan{}, nil
+		}
+		return nil, err
+	}
+
+	if traceID == "" {
+		return []TraceSpan{}, nil
+	}
+
+	// Get all root spans (transactions) with this trace_id
+	rows, err := db.Query(`
+		SELECT DISTINCT id, project_id, trace_id, span_id, parent_span_id,
+		       name, op, description, start_timestamp, timestamp, status, data
+		FROM spans
+		WHERE trace_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')
+		ORDER BY start_timestamp DESC`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		err := rows.Scan(
+			&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID,
+			&s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data,
+		)
+		if err != nil {
+			return nil, err
+		}
+		spans = append(spans, s)
+	}
+	return spans, nil
+}
+
+// GetErrorsForTrace returns all errors linked to a specific trace_id
+func GetErrorsForTrace(db *sql.DB, traceID string) ([]ErrorEvent, error) {
+	rows, err := db.Query(`
+		SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
+		FROM errors
+		WHERE trace_id = ?
+		ORDER BY created_at DESC`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var errors []ErrorEvent
+	for rows.Next() {
+		var e ErrorEvent
+		err := rows.Scan(
+			&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+			&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+			&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		errors = append(errors, e)
+	}
+	return errors, nil
+}
+
+// GetErrorWithTraces returns an error and its linked traces in one call
+func GetErrorWithTraces(db *sql.DB, errorID string) (*ErrorEvent, []TraceSpan, error) {
+	error, err := GetError(db, errorID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	traces, err := GetTracesForError(db, errorID)
+	if err != nil {
+		return error, nil, err
+	}
+
+	return error, traces, nil
 }
 
 // Monitor functions
@@ -1164,6 +1544,145 @@ func UpdateSecurityPolicy(db *sql.DB, p *SecurityPolicy) error {
 		p.ProjectID, p.IPWhitelist, p.AllowedDomains, p.Enforced,
 	)
 	return err
+}
+
+// GetAllErrorsWithStatsLightweight returns errors with stats but without stacktrace/context for list views
+func GetAllErrorsWithStatsLightweight(db *sql.DB, limit int, cursor string, status string) ([]map[string]interface{}, string, bool, error) {
+	baseQuery := "FROM errors"
+	var args []interface{}
+
+	if status != "" {
+		baseQuery += " WHERE status = ?"
+		args = append(args, status)
+	} else {
+		baseQuery += " WHERE 1=1"
+	}
+
+	// Cursor-based pagination
+	if cursor != "" {
+		baseQuery += " AND created_at < ?"
+		args = append(args, cursor)
+	}
+
+	// Exclude stacktrace and context for list views
+	selectQuery := `SELECT id, project_id, message, level, environment, release, platform, timestamp, '', '', user, tags, status, created_at ` + baseQuery + " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit+1) // Fetch one extra to check if there's more
+
+	rows, err := db.Query(selectQuery, args...)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer rows.Close()
+
+	var errors []ErrorEvent
+	for rows.Next() {
+		var e ErrorEvent
+		err := rows.Scan(
+			&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
+			&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
+			&e.User, &e.Tags, &e.Status, &e.CreatedAt,
+		)
+		if err != nil {
+			return nil, "", false, err
+		}
+		errors = append(errors, e)
+	}
+
+	hasMore := len(errors) > limit
+	if hasMore {
+		errors = errors[:limit]
+	}
+
+	// Batch calculate stats for all messages
+	messageSet := make(map[string]bool)
+	for _, e := range errors {
+		messageSet[e.Message] = true
+	}
+
+	// Get event counts for all messages in one query
+	eventCounts := make(map[string]int)
+	if len(messageSet) > 0 {
+		messages := make([]interface{}, 0, len(messageSet))
+		for msg := range messageSet {
+			messages = append(messages, msg)
+		}
+		placeholders := strings.Repeat("?,", len(messages))
+		placeholders = placeholders[:len(placeholders)-1]
+
+		query := "SELECT message, COUNT(*) FROM errors WHERE message IN (" + placeholders + ")"
+		queryArgs := messages
+		if status != "" {
+			query += " AND status = ?"
+			queryArgs = append(queryArgs, status)
+		}
+		query += " GROUP BY message"
+
+		statsRows, _ := db.Query(query, queryArgs...)
+		if statsRows != nil {
+			defer statsRows.Close()
+			for statsRows.Next() {
+				var msg string
+				var count int
+				if err := statsRows.Scan(&msg, &count); err == nil {
+					eventCounts[msg] = count
+				}
+			}
+		}
+	}
+
+	// Get user counts
+	userCounts := make(map[string]int)
+	if len(messageSet) > 0 {
+		messages := make([]interface{}, 0, len(messageSet))
+		for msg := range messageSet {
+			messages = append(messages, msg)
+		}
+		placeholders := strings.Repeat("?,", len(messages))
+		placeholders = placeholders[:len(placeholders)-1]
+
+		query := "SELECT message, COUNT(DISTINCT user) FROM errors WHERE message IN (" + placeholders + ") AND user IS NOT NULL AND user != '' GROUP BY message"
+		queryArgs := messages
+
+		userRows, _ := db.Query(query, queryArgs...)
+		if userRows != nil {
+			defer userRows.Close()
+			for userRows.Next() {
+				var msg string
+				var count int
+				if err := userRows.Scan(&msg, &count); err == nil {
+					userCounts[msg] = count
+				}
+			}
+		}
+	}
+
+	result := make([]map[string]interface{}, 0, len(errors))
+	for _, e := range errors {
+		errorMap := map[string]interface{}{
+			"id":          e.ID,
+			"project_id":  e.ProjectID,
+			"message":     e.Message,
+			"level":       e.Level,
+			"environment": e.Environment,
+			"release":     e.Release,
+			"platform":    e.Platform,
+			"timestamp":   e.Timestamp,
+			"user":        e.User,
+			"tags":        e.Tags,
+			"status":      e.Status,
+			"created_at":  e.CreatedAt,
+			"event_count": eventCounts[e.Message],
+			"user_count":  userCounts[e.Message],
+		}
+		result = append(result, errorMap)
+	}
+
+	nextCursor := ""
+	if len(errors) > 0 {
+		nextCursor = errors[len(errors)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+
+	return result, nextCursor, hasMore, nil
 }
 
 func GetAllErrorsWithStats(db *sql.DB, limit, offset int, status string) ([]map[string]interface{}, int, error) {
@@ -1433,7 +1952,8 @@ func GetSystemStats(db *sql.DB) (SystemStats, error) {
 	return stats, nil
 }
 
-func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]TraceSpan, error) {
+// GetAllRootSpansLightweight returns spans with cursor-based pagination
+func GetAllRootSpansLightweight(db *sql.DB, projectID, query string, limit int, cursor string) ([]TraceSpan, string, bool, error) {
 	sqlQuery := `
 		SELECT id, project_id, trace_id, span_id, parent_span_id,
 		       name, op, description, start_timestamp, timestamp, status, data
@@ -1453,12 +1973,18 @@ func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]
 		args = append(args, q, q, q)
 	}
 
-	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	// Cursor-based pagination
+	if cursor != "" {
+		sqlQuery += " AND start_timestamp < ?"
+		args = append(args, cursor)
+	}
+
+	sqlQuery += " ORDER BY start_timestamp DESC LIMIT ?"
+	args = append(args, limit+1) // Fetch one extra to check if there's more
 
 	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
 	defer rows.Close()
 

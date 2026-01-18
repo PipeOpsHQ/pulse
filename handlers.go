@@ -230,6 +230,22 @@ func storeError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
+	// Extract trace_id from context if available
+	traceID := ""
+	if req.Context != nil {
+		if traceContext, ok := req.Context["trace"].(map[string]interface{}); ok {
+			if traceIDVal, ok := traceContext["trace_id"].(string); ok && traceIDVal != "" {
+				traceID = traceIDVal
+			}
+		}
+		// Also check if trace_id is directly in context
+		if traceID == "" {
+			if traceIDVal, ok := req.Context["trace_id"].(string); ok && traceIDVal != "" {
+				traceID = traceIDVal
+			}
+		}
+	}
+
 	// Convert stacktrace, context, user, tags to JSON strings
 	stacktraceJSON, _ := json.Marshal(req.Stacktrace)
 	contextJSON, _ := json.Marshal(req.Context)
@@ -254,19 +270,22 @@ func storeError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		Context:     string(contextJSON),
 		User:        string(userJSON),
 		Tags:        string(tagsJSON),
+		TraceID:     traceID,
 		CreatedAt:   time.Now(),
 	}
 
-	if err := InsertError(db, event); err != nil {
-		http.Error(w, "Failed to store error", http.StatusInternalServerError)
-		return
+	// Use batch inserter for better performance
+	select {
+	case errorBatchChan <- ErrorBatch{Event: event, Project: project}:
+		// Successfully queued for batch insertion
+	default:
+		// Channel full, fallback to immediate insert
+		if err := InsertError(db, event); err != nil {
+			http.Error(w, "Failed to store error", http.StatusInternalServerError)
+			return
+		}
+		triggerNotifications(db, project, event)
 	}
-
-	// Increment count
-	IncrementProjectEventCount(db, project.ID)
-
-	// Trigger notifications
-	triggerNotifications(db, project, event)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ErrorResponse{ID: event.ID})
@@ -325,8 +344,9 @@ func getProject(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Parse pagination parameters
 	limit := 50
-	offset := 0
 	status := r.URL.Query().Get("status")
+	cursor := r.URL.Query().Get("cursor")
+	useCursor := cursor != "" || r.URL.Query().Get("use_cursor") == "true"
 
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
@@ -334,21 +354,35 @@ func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		}
 	}
 
-	if o := r.URL.Query().Get("offset"); o != "" {
-		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
-
 	projectID := r.URL.Query().Get("projectId")
 	var errors []map[string]interface{}
-	var total int
 	var err error
+	var nextCursor string
+	var hasMore bool
+	var total int
+	var offset int
 
-	if projectID != "" {
-		errors, total, err = GetErrorsWithStats(db, projectID, limit, offset, status)
+	if useCursor {
+		// Use cursor-based pagination (preferred for performance)
+		if projectID != "" {
+			errors, nextCursor, hasMore, err = GetErrorsWithStatsLightweight(db, projectID, limit, cursor, status)
+		} else {
+			errors, nextCursor, hasMore, err = GetAllErrorsWithStatsLightweight(db, limit, cursor, status)
+		}
 	} else {
-		errors, total, err = GetAllErrorsWithStats(db, limit, offset, status)
+		// Fallback to offset-based pagination (for backward compatibility)
+		offset = 0
+		if o := r.URL.Query().Get("offset"); o != "" {
+			if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+				offset = parsed
+			}
+		}
+
+		if projectID != "" {
+			errors, total, err = GetErrorsWithStats(db, projectID, limit, offset, status)
+		} else {
+			errors, total, err = GetAllErrorsWithStats(db, limit, offset, status)
+		}
 	}
 
 	if err != nil {
@@ -357,13 +391,20 @@ func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	// Return paginated response
+	meta := map[string]interface{}{
+		"limit": limit,
+	}
+	if useCursor {
+		meta["cursor"] = nextCursor
+		meta["has_more"] = hasMore
+	} else {
+		meta["total"] = total
+		meta["offset"] = offset
+	}
+
 	response := map[string]interface{}{
 		"data": errors,
-		"meta": map[string]interface{}{
-			"total":  total,
-			"limit":  limit,
-			"offset": offset,
-		},
+		"meta": meta,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -682,6 +723,16 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		contextData["sdk"] = sentryEvent.SDK
 	}
 
+	// Extract trace_id from contexts if available
+	traceID := ""
+	if sentryEvent.Contexts != nil {
+		if traceContext, ok := sentryEvent.Contexts["trace"].(map[string]interface{}); ok {
+			if traceIDVal, ok := traceContext["trace_id"].(string); ok && traceIDVal != "" {
+				traceID = traceIDVal
+			}
+		}
+	}
+
 	// Convert to JSON strings
 	stacktraceJSON, _ := json.Marshal(stacktraceData)
 	contextJSON, _ := json.Marshal(contextData)
@@ -720,22 +771,25 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		Context:     string(contextJSON),
 		User:        string(userJSON),
 		Tags:        string(tagsJSON),
+		TraceID:     traceID,
 		CreatedAt:   time.Now(),
 	}
 
-	if err := InsertError(db, event); err != nil {
-		log.Printf("[DSN Debug] Failed to insert error for project %s: %v", projectID, err)
-		http.Error(w, "Failed to store error", http.StatusInternalServerError)
-		return
+	// Use batch inserter for better performance
+	select {
+	case errorBatchChan <- ErrorBatch{Event: event, Project: project}:
+		// Successfully queued for batch insertion
+		log.Printf("[DSN Debug] Queued error %s for batch insertion (project %s)", eventID, projectID)
+	default:
+		// Channel full, fallback to immediate insert
+		log.Printf("[DSN Debug] Batch channel full, inserting immediately for project %s", projectID)
+		if err := InsertError(db, event); err != nil {
+			log.Printf("[DSN Debug] Failed to insert error for project %s: %v", projectID, err)
+			http.Error(w, "Failed to store error", http.StatusInternalServerError)
+			return
+		}
+		triggerNotifications(db, project, event)
 	}
-
-	log.Printf("[DSN Debug] Successfully stored error %s for project %s", eventID, projectID)
-
-	// Increment count
-	IncrementProjectEventCount(db, projectID)
-
-	// Trigger notifications
-	triggerNotifications(db, project, event)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ErrorResponse{ID: eventID})
@@ -785,6 +839,34 @@ func getTraceDetails(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(spans)
+}
+
+func getErrorTraces(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	vars := mux.Vars(r)
+	errorID := vars["errorId"]
+
+	traces, err := GetTracesForError(db, errorID)
+	if err != nil {
+		http.Error(w, "Failed to fetch traces for error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(traces)
+}
+
+func getTraceErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	vars := mux.Vars(r)
+	traceID := vars["traceId"]
+
+	errors, err := GetErrorsForTrace(db, traceID)
+	if err != nil {
+		http.Error(w, "Failed to fetch errors for trace", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(errors)
 }
 
 // handleEnvelopeSentry processes Sentry Envelopes (Transactions, Spans, etc.)
@@ -963,17 +1045,23 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					Environment: tx.Environment, Release: tx.Release, Platform: tx.Platform,
 					Timestamp: floatToTime(float64(tx.Timestamp)), Stacktrace: string(stJSON),
 					Context: string(ctxJSON), User: string(usrJSON), Tags: string(tagsJSON),
-					Status: "unresolved", CreatedAt: time.Now(),
+					TraceID: tx.Contexts.Trace.TraceID, Status: "unresolved", CreatedAt: time.Now(),
 				}
 				if errorEvent.Level == "" {
 					errorEvent.Level = "error"
 				}
-				if err := InsertError(db, errorEvent); err != nil {
-					log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
-				} else {
-					log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
-					IncrementProjectEventCount(db, projectID)
-					triggerNotifications(db, project, errorEvent)
+				// Use batch inserter
+				select {
+				case errorBatchChan <- ErrorBatch{Event: errorEvent, Project: project}:
+					log.Printf("[DSN Debug] Queued error from transaction %s for batch insertion", tx.EventID)
+				default:
+					// Channel full, fallback to immediate insert
+					if err := InsertError(db, errorEvent); err != nil {
+						log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
+					} else {
+						log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
+						triggerNotifications(db, project, errorEvent)
+					}
 				}
 			}
 
@@ -996,6 +1084,16 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				stacktraceData = make(map[string]interface{})
 			}
 
+			// Extract trace_id from contexts if available
+			traceID := ""
+			if evt.Contexts != nil {
+				if traceContext, ok := evt.Contexts["trace"].(map[string]interface{}); ok {
+					if traceIDVal, ok := traceContext["trace_id"].(string); ok && traceIDVal != "" {
+						traceID = traceIDVal
+					}
+				}
+			}
+
 			stJSON, _ := json.Marshal(stacktraceData)
 			ctxJSON, _ := json.Marshal(evt.Contexts)
 			usrJSON, _ := json.Marshal(evt.User)
@@ -1013,17 +1111,23 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 				Environment: evt.Environment, Release: evt.Release, Platform: evt.Platform,
 				Timestamp: ts, Stacktrace: string(stJSON), Context: string(ctxJSON),
 				User: string(usrJSON), Tags: string(tagsJSON),
-				Status: "unresolved", CreatedAt: time.Now(),
+				TraceID: traceID, Status: "unresolved", CreatedAt: time.Now(),
 			}
 			if errorEvent.Level == "" {
 				errorEvent.Level = "error"
 			}
-			if err := InsertError(db, errorEvent); err != nil {
-				log.Printf("[DSN Debug] Failed to insert error event: %v", err)
-			} else {
-				log.Printf("[DSN Debug] Successfully stored error event %s", evt.EventID)
-				IncrementProjectEventCount(db, projectID)
-				triggerNotifications(db, project, errorEvent)
+			// Use batch inserter
+			select {
+			case errorBatchChan <- ErrorBatch{Event: errorEvent, Project: project}:
+				log.Printf("[DSN Debug] Queued error event %s for batch insertion", evt.EventID)
+			default:
+				// Channel full, fallback to immediate insert
+				if err := InsertError(db, errorEvent); err != nil {
+					log.Printf("[DSN Debug] Failed to insert error event: %v", err)
+				} else {
+					log.Printf("[DSN Debug] Successfully stored error event %s", evt.EventID)
+					triggerNotifications(db, project, errorEvent)
+				}
 			}
 		}
 	}
