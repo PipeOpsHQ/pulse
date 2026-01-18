@@ -29,6 +29,9 @@
     LayoutList,
     AlertCircle,
     Trash2,
+    Settings2,
+    Save,
+    X,
   } from "lucide-svelte";
 
   let project = null;
@@ -60,6 +63,22 @@
     interval: 60,
     timeout: 30,
   };
+
+  // Settings state
+  let projectSettings = null;
+  let loadingSettings = false;
+  let savingSettings = false;
+  let editingSettings = {
+    name: "",
+    max_events_per_month: 1000,
+    notification_enabled: true,
+    notification_levels: [],
+    notification_frequency: "immediate",
+    notification_email: "",
+    notification_webhook_url: "",
+    notification_rate_limit: 60,
+  };
+  let originalSettings = null;
 
   // Check if project has any data
   $: hasData =
@@ -112,6 +131,153 @@
     }
   }
 
+  async function loadProjectSettings() {
+    if (!projectId) return;
+
+    loadingSettings = true;
+    try {
+      const response = await api.get(`/projects/${projectId}/settings`);
+
+      // Initialize editing settings with project data and settings
+      editingSettings = {
+        name: project?.name || "",
+        max_events_per_month: project?.max_events_per_month || 1000,
+        notification_enabled: response?.notification_enabled ?? true,
+        notification_levels: response?.notification_levels
+          ? response.notification_levels.split(",").map(l => l.trim()).filter(l => l)
+          : ["error", "fatal"],
+        notification_frequency: response?.notification_frequency || "immediate",
+        notification_email: response?.notification_email || "",
+        notification_webhook_url: response?.notification_webhook_url || "",
+        notification_rate_limit: response?.notification_rate_limit || 60,
+      };
+
+      projectSettings = response;
+      originalSettings = JSON.parse(JSON.stringify(editingSettings));
+    } catch (err) {
+      console.error("Failed to load project settings:", err);
+      // Initialize with defaults if settings don't exist
+      editingSettings = {
+        name: project?.name || "",
+        max_events_per_month: project?.max_events_per_month || 1000,
+        notification_enabled: true,
+        notification_levels: ["error", "fatal"],
+        notification_frequency: "immediate",
+        notification_email: "",
+        notification_webhook_url: "",
+        notification_rate_limit: 60,
+      };
+      originalSettings = JSON.parse(JSON.stringify(editingSettings));
+    } finally {
+      loadingSettings = false;
+    }
+  }
+
+  function validateSettings() {
+    if (!editingSettings.name || editingSettings.name.trim() === "") {
+      toast.error("Project name is required");
+      return false;
+    }
+
+    if (editingSettings.max_events_per_month < 0) {
+      toast.error("Quota must be a positive number");
+      return false;
+    }
+
+    if (editingSettings.notification_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editingSettings.notification_email)) {
+      toast.error("Invalid email address");
+      return false;
+    }
+
+    if (editingSettings.notification_webhook_url && editingSettings.notification_webhook_url.trim() !== "") {
+      try {
+        new URL(editingSettings.notification_webhook_url);
+      } catch {
+        toast.error("Invalid webhook URL");
+        return false;
+      }
+    }
+
+    if (editingSettings.notification_rate_limit < 0) {
+      toast.error("Rate limit must be a positive number");
+      return false;
+    }
+
+    return true;
+  }
+
+  function hasChanges() {
+    if (!originalSettings) return false;
+    return JSON.stringify(editingSettings) !== JSON.stringify(originalSettings);
+  }
+
+  function resetSettings() {
+    if (originalSettings) {
+      editingSettings = JSON.parse(JSON.stringify(originalSettings));
+    }
+  }
+
+  async function saveProjectSettings() {
+    if (!validateSettings()) {
+      return;
+    }
+
+    if (!hasChanges()) {
+      toast.info("No changes to save");
+      return;
+    }
+
+    savingSettings = true;
+    try {
+      const originalQuota = project?.max_events_per_month;
+      const quotaChanged = editingSettings.max_events_per_month !== originalQuota;
+
+      // Prepare settings payload
+      const settingsPayload = {
+        name: editingSettings.name,
+        notification_enabled: editingSettings.notification_enabled,
+        notification_levels: editingSettings.notification_levels.join(","),
+        notification_frequency: editingSettings.notification_frequency,
+        notification_email: editingSettings.notification_email,
+        notification_webhook_url: editingSettings.notification_webhook_url,
+        notification_rate_limit: editingSettings.notification_rate_limit,
+      };
+
+      // Update settings (includes project name)
+      const response = await api.patch(`/projects/${projectId}/settings`, settingsPayload);
+
+      // Update quota separately if changed
+      if (quotaChanged) {
+        await api.patch(`/projects/${projectId}/quota`, {
+          max_events_per_month: editingSettings.max_events_per_month,
+        });
+      }
+
+      // Update local project state
+      if (response?.project) {
+        project = response.project;
+      } else {
+        // Reload project data to get updated values
+        await loadProjectData(false);
+      }
+
+      // Update settings state
+      if (response?.settings) {
+        projectSettings = response.settings;
+      }
+
+      // Update original settings to reflect saved state
+      originalSettings = JSON.parse(JSON.stringify(editingSettings));
+
+      toast.success("Settings saved successfully");
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      toast.error("Failed to save settings");
+    } finally {
+      savingSettings = false;
+    }
+  }
+
   onMount(async () => {
     const pathParts = window.location.pathname.split("/projects/");
     projectId = pathParts.length > 1 ? pathParts[1] : "";
@@ -121,7 +287,7 @@
     const tabParam = urlParams.get("tab");
     if (
       tabParam &&
-      ["overview", "coverage", "monitors", "traces", "issues"].includes(
+      ["overview", "coverage", "monitors", "traces", "issues", "settings"].includes(
         tabParam,
       )
     ) {
@@ -638,6 +804,18 @@ Sentry.init({
         on:click={loadMonitors}
       >
         Uptime
+      </button>
+      <button
+        class="pb-3 text-xs font-semibold uppercase tracking-wider transition-all {activeTab ===
+        'settings'
+          ? 'border-b-2 border-pulse-500 text-white'
+          : 'text-slate-500 hover:text-white'}"
+        on:click={() => {
+          setActiveTab("settings");
+          loadProjectSettings();
+        }}
+      >
+        Settings
       </button>
     </div>
 
@@ -1801,6 +1979,379 @@ Sentry.init({
               {/each}
             </div>
           {/if}
+        </div>
+      </div>
+    {/if}
+
+    {#if activeTab === "settings"}
+      <div class="animate-in fade-in duration-300">
+        <div class="grid grid-cols-1 gap-8 lg:grid-cols-12">
+          <div class="lg:col-span-8 space-y-6">
+            <!-- General Settings Card -->
+            <div
+              class="rounded-xl border border-white/10 bg-white/5 backdrop-blur-xl"
+            >
+              <div
+                class="border-b border-white/10 p-6 flex items-center justify-between"
+              >
+                <div class="flex items-center gap-3">
+                  <div class="p-2 rounded-lg bg-pulse-500/10 text-pulse-400">
+                    <Settings2 size={20} />
+                  </div>
+                  <div>
+                    <h2
+                      class="text-xs font-semibold uppercase tracking-wider text-white"
+                    >
+                      General Settings
+                    </h2>
+                    <p class="text-xs text-slate-500">
+                      Configure project name and quota
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="p-6 space-y-6">
+                {#if loadingSettings}
+                  <div class="flex items-center justify-center py-8">
+                    <div
+                      class="h-8 w-8 animate-spin rounded-full border-4 border-pulse-500/20 border-t-pulse-500"
+                    ></div>
+                  </div>
+                {:else}
+                  <div class="space-y-4">
+                    <div>
+                      <label
+                        for="project-name"
+                        class="block text-xs font-semibold text-slate-300 mb-2"
+                      >
+                        Project Name
+                      </label>
+                      <input
+                        id="project-name"
+                        type="text"
+                        bind:value={editingSettings.name}
+                        placeholder="My Project"
+                        class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pulse-500/50 transition-colors"
+                      />
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label
+                          for="project-id"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Project ID
+                        </label>
+                        <input
+                          id="project-id"
+                          type="text"
+                          value={project?.id || ""}
+                          readonly
+                          class="w-full px-4 py-2.5 bg-black/40 border border-white/5 rounded-lg text-sm text-slate-400 font-mono cursor-not-allowed"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          for="created-at"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Created At
+                        </label>
+                        <input
+                          id="created-at"
+                          type="text"
+                          value={project ? formatDate(project.created_at) : ""}
+                          readonly
+                          class="w-full px-4 py-2.5 bg-black/40 border border-white/5 rounded-lg text-sm text-slate-400 cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label
+                          for="quota"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Max Events Per Month
+                        </label>
+                        <input
+                          id="quota"
+                          type="number"
+                          min="0"
+                          bind:value={editingSettings.max_events_per_month}
+                          placeholder="1000"
+                          class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pulse-500/50 transition-colors"
+                        />
+                        <p class="mt-1 text-xs text-slate-500">
+                          Maximum number of events allowed per month
+                        </p>
+                      </div>
+
+                      <div>
+                        <label
+                          for="current-events"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Current Month Events
+                        </label>
+                        <input
+                          id="current-events"
+                          type="text"
+                          value={project?.current_month_events || 0}
+                          readonly
+                          class="w-full px-4 py-2.5 bg-black/40 border border-white/5 rounded-lg text-sm text-slate-400 cursor-not-allowed"
+                        />
+                        <p class="mt-1 text-xs text-slate-500">
+                          Events ingested this month
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </div>
+
+            <!-- Notification Settings Card -->
+            <div
+              class="rounded-xl border border-white/10 bg-white/5 backdrop-blur-xl"
+            >
+              <div
+                class="border-b border-white/10 p-6 flex items-center justify-between"
+              >
+                <div class="flex items-center gap-3">
+                  <div class="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <h2
+                      class="text-xs font-semibold uppercase tracking-wider text-white"
+                    >
+                      Notification Settings
+                    </h2>
+                    <p class="text-xs text-slate-500">
+                      Configure error notifications
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="p-6 space-y-6">
+                {#if loadingSettings}
+                  <div class="flex items-center justify-center py-8">
+                    <div
+                      class="h-8 w-8 animate-spin rounded-full border-4 border-pulse-500/20 border-t-pulse-500"
+                    ></div>
+                  </div>
+                {:else}
+                  <div class="space-y-6">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <label
+                          for="notifications-enabled"
+                          class="block text-xs font-semibold text-slate-300 mb-1"
+                        >
+                          Enable Notifications
+                        </label>
+                        <p class="text-xs text-slate-500">
+                          Receive notifications when errors occur
+                        </p>
+                      </div>
+                      <label class="relative inline-flex items-center cursor-pointer">
+                        <input
+                          id="notifications-enabled"
+                          type="checkbox"
+                          bind:checked={editingSettings.notification_enabled}
+                          class="sr-only peer"
+                        />
+                        <div
+                          class="w-11 h-6 bg-white/10 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-pulse-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pulse-500"
+                        ></div>
+                      </label>
+                    </div>
+
+                    {#if editingSettings.notification_enabled}
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-3">
+                          Notification Levels
+                        </label>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          {#each ["error", "fatal", "warning", "info"] as level}
+                            <label class="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editingSettings.notification_levels.includes(level)}
+                                on:change={(e) => {
+                                  if (e.target.checked) {
+                                    editingSettings.notification_levels = [...editingSettings.notification_levels, level];
+                                  } else {
+                                    editingSettings.notification_levels = editingSettings.notification_levels.filter(l => l !== level);
+                                  }
+                                }}
+                                class="w-4 h-4 rounded border-white/20 bg-black/60 text-pulse-500 focus:ring-pulse-500 focus:ring-offset-0"
+                              />
+                              <span class="text-xs text-slate-300 capitalize">{level}</span>
+                            </label>
+                          {/each}
+                        </div>
+                        <p class="mt-2 text-xs text-slate-500">
+                          Select which error levels trigger notifications
+                        </p>
+                      </div>
+
+                      <div>
+                        <label
+                          for="notification-frequency"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Notification Frequency
+                        </label>
+                        <select
+                          id="notification-frequency"
+                          bind:value={editingSettings.notification_frequency}
+                          class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-pulse-500/50 transition-colors"
+                        >
+                          <option value="immediate">Immediate</option>
+                          <option value="hourly">Hourly</option>
+                          <option value="daily">Daily</option>
+                        </select>
+                        <p class="mt-1 text-xs text-slate-500">
+                          How often to send notifications
+                        </p>
+                      </div>
+
+                      <div>
+                        <label
+                          for="notification-email"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Notification Email
+                        </label>
+                        <input
+                          id="notification-email"
+                          type="email"
+                          bind:value={editingSettings.notification_email}
+                          placeholder="alerts@example.com"
+                          class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pulse-500/50 transition-colors"
+                        />
+                        <p class="mt-1 text-xs text-slate-500">
+                          Email address to receive notifications
+                        </p>
+                      </div>
+
+                      <div>
+                        <label
+                          for="notification-webhook"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Webhook URL
+                        </label>
+                        <input
+                          id="notification-webhook"
+                          type="url"
+                          bind:value={editingSettings.notification_webhook_url}
+                          placeholder="https://hooks.slack.com/services/..."
+                          class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pulse-500/50 transition-colors"
+                        />
+                        <p class="mt-1 text-xs text-slate-500">
+                          Webhook URL for custom integrations (Slack, Discord, etc.)
+                        </p>
+                      </div>
+
+                      <div>
+                        <label
+                          for="notification-rate-limit"
+                          class="block text-xs font-semibold text-slate-300 mb-2"
+                        >
+                          Rate Limit (minutes)
+                        </label>
+                        <input
+                          id="notification-rate-limit"
+                          type="number"
+                          min="0"
+                          bind:value={editingSettings.notification_rate_limit}
+                          placeholder="60"
+                          class="w-full px-4 py-2.5 bg-black/60 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pulse-500/50 transition-colors"
+                        />
+                        <p class="mt-1 text-xs text-slate-500">
+                          Minimum minutes between notifications for the same error
+                        </p>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <div
+                class="border-t border-white/10 p-6 flex items-center justify-end gap-3"
+              >
+                <button
+                  on:click={resetSettings}
+                  disabled={!hasChanges() || savingSettings}
+                  class="px-5 py-2.5 rounded-lg border border-white/10 text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+                <button
+                  on:click={saveProjectSettings}
+                  disabled={!hasChanges() || savingSettings}
+                  class="pulse-button-primary px-5 py-2.5 text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {#if savingSettings}
+                    <div
+                      class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                    ></div>
+                  {:else}
+                    <Save size={14} />
+                  {/if}
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Info Sidebar -->
+          <div class="lg:col-span-4 space-y-6">
+            <div
+              class="rounded-xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
+            >
+              <h3
+                class="mb-6 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400"
+              >
+                <Info size={14} />
+                <span>About Settings</span>
+              </h3>
+
+              <div class="space-y-4 text-xs text-slate-400">
+                <p>
+                  Project settings allow you to customize how your project
+                  handles errors and notifications.
+                </p>
+                <div>
+                  <h4 class="font-semibold text-slate-300 mb-2">
+                    General Settings
+                  </h4>
+                  <p>
+                    Update your project name and configure event quotas to
+                    control usage limits.
+                  </p>
+                </div>
+                <div>
+                  <h4 class="font-semibold text-slate-300 mb-2">
+                    Notifications
+                  </h4>
+                  <p>
+                    Configure when and how you receive alerts about errors in
+                    your application.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     {/if}
