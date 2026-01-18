@@ -30,7 +30,6 @@ frontend/.svelte-kit/
 # OS
 .DS_Store
 Thumbs.db
-
 # Logs
 *.log
 sentry-alt
