@@ -4,6 +4,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // Vite configuration
 export default defineConfig({
   plugins: [svelte()],
+  publicDir: 'public',
   server: {
     port: 5173,
     proxy: {
