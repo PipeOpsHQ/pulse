@@ -2477,3 +2477,66 @@ func getAllTraces(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(spans)
 }
+
+func getTraceStats(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	projectID := r.URL.Query().Get("project_id")
+	hours := 24
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if parsed, err := strconv.Atoi(h); err == nil && parsed > 0 {
+			hours = parsed
+		}
+	}
+
+	stats, err := GetTraceStats(db, projectID, hours)
+	if err != nil {
+		http.Error(w, "Failed to fetch trace stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func getTraceTimeSeries(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	projectID := r.URL.Query().Get("project_id")
+	hours := 24
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if parsed, err := strconv.Atoi(h); err == nil && parsed > 0 {
+			hours = parsed
+		}
+	}
+
+	series, err := GetTraceTimeSeries(db, projectID, hours)
+	if err != nil {
+		http.Error(w, "Failed to fetch trace time series", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(series)
+}
+
+func getTraceOperationStats(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	projectID := r.URL.Query().Get("project_id")
+	hours := 24
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if parsed, err := strconv.Atoi(h); err == nil && parsed > 0 {
+			hours = parsed
+		}
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	stats, err := GetTraceOperationStats(db, projectID, hours, limit)
+	if err != nil {
+		http.Error(w, "Failed to fetch operation stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}

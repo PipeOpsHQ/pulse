@@ -233,6 +233,18 @@ func main() {
 		getAllTraces(w, r, db)
 	}).Methods("GET", "OPTIONS")
 
+	api.HandleFunc("/traces/stats", func(w http.ResponseWriter, r *http.Request) {
+		getTraceStats(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
+	api.HandleFunc("/traces/timeseries", func(w http.ResponseWriter, r *http.Request) {
+		getTraceTimeSeries(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
+	api.HandleFunc("/traces/operations", func(w http.ResponseWriter, r *http.Request) {
+		getTraceOperationStats(w, r, db)
+	}).Methods("GET", "OPTIONS")
+
 	api.HandleFunc("/errors/{id}", func(w http.ResponseWriter, r *http.Request) {
 		getError(w, r, db)
 	}).Methods("GET", "OPTIONS")

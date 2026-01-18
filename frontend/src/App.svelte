@@ -13,6 +13,7 @@
   import Traces from "./pages/Traces.svelte";
   import AllTraces from "./pages/AllTraces.svelte";
   import TraceDetail from "./pages/TraceDetail.svelte";
+  import TraceAnalytics from "./pages/TraceAnalytics.svelte";
   import StatusPage from "./pages/StatusPage.svelte";
   import Insights from "./pages/Insights.svelte";
   import Admin from "./pages/Admin.svelte";
@@ -138,6 +139,8 @@
             <Admin />
           {:else if currentPath === "/traces"}
             <AllTraces />
+          {:else if currentPath === "/trace-analytics"}
+            <TraceAnalytics />
           {:else if currentPath.startsWith("/errors/")}
             <IssueDetail />
           {:else if currentPath.startsWith("/projects/")}

@@ -5,7 +5,7 @@ const API_BASE = '/api';
 
 // Cache for GET requests
 const cache = new Map();
-const CACHE_TTL = 5000; // 5 seconds default TTL
+const CACHE_TTL = 2000; // 2 seconds default TTL (reduced for better freshness)
 const pendingRequests = new Map(); // Request deduplication
 
 /**
@@ -24,20 +24,66 @@ function isCacheValid(entry) {
 }
 
 /**
- * Clear cache for an endpoint (call after mutations)
+ * Clear cache for an endpoint and all related endpoints (call after mutations)
  */
 export function clearCache(endpoint) {
-  if (endpoint) {
-    const key = getCacheKey(endpoint);
-    cache.delete(key);
-    // Also clear related caches (e.g., clearing /errors clears /errors?status=...)
+  if (!endpoint) {
+    cache.clear();
+    return;
+  }
+
+  const basePath = endpoint.split('?')[0];
+  const keysToDelete = new Set();
+
+  // Add the exact endpoint
+  keysToDelete.add(getCacheKey(endpoint));
+  keysToDelete.add(getCacheKey(basePath));
+
+  // Extract path segments for smarter clearing
+  const segments = basePath.split('/').filter(s => s);
+
+  // Clear parent endpoints
+  // e.g., /projects/123/monitors/456 -> clear /projects/123/monitors, /projects/123, /projects
+  for (let i = segments.length - 1; i > 0; i--) {
+    const parentPath = '/' + segments.slice(0, i).join('/');
+    keysToDelete.add(getCacheKey(parentPath));
+  }
+
+  // Clear all caches that start with the base path
+  for (const [k] of cache) {
+    const cachedPath = k.replace('GET:', '');
+    if (cachedPath.startsWith(basePath) || basePath.startsWith(cachedPath.split('?')[0])) {
+      keysToDelete.add(k);
+    }
+  }
+
+  // Clear related list endpoints
+  if (basePath.includes('/errors')) {
+    // Clear all error-related caches
     for (const [k] of cache) {
-      if (k.includes(endpoint.split('?')[0])) {
-        cache.delete(k);
+      if (k.includes('/errors') || k.includes('/insights')) {
+        keysToDelete.add(k);
       }
     }
-  } else {
-    cache.clear();
+  } else if (basePath.includes('/projects')) {
+    // Clear all project-related caches
+    for (const [k] of cache) {
+      if (k.includes('/projects')) {
+        keysToDelete.add(k);
+      }
+    }
+  } else if (basePath.includes('/monitors')) {
+    // Clear monitor-related caches
+    for (const [k] of cache) {
+      if (k.includes('/monitors')) {
+        keysToDelete.add(k);
+      }
+    }
+  }
+
+  // Delete all collected keys
+  for (const key of keysToDelete) {
+    cache.delete(key);
   }
 }
 

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { navigate } from "../lib/router";
   import Link from "../components/Link.svelte";
-  import { api } from "../lib/api";
+  import { api, clearCache } from "../lib/api";
   import { toast } from "../stores/toast";
   import {
     CheckCircle2,
@@ -168,7 +168,9 @@
     if (!error) return;
     try {
       await api.patch(`/errors/${error.id}`, { status: newStatus });
-      // Reload error data to ensure we have the latest state
+      // Clear cache and reload error data to ensure we have the latest state
+      clearCache(`/errors/${error.id}`);
+      clearCache('/errors');
       await loadError(error.id);
       toast.success(`Error marked as ${newStatus}`);
     } catch (err) {

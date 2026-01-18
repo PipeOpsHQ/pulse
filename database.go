@@ -2100,3 +2100,283 @@ func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]
 	}
 	return spans, nil
 }
+
+// Trace Analytics functions
+type TraceStats struct {
+	TotalTraces      int     `json:"total_traces"`
+	AvgDuration      float64 `json:"avg_duration_ms"`
+	P50Duration      float64 `json:"p50_duration_ms"`
+	P75Duration      float64 `json:"p75_duration_ms"`
+	P95Duration      float64 `json:"p95_duration_ms"`
+	P99Duration      float64 `json:"p99_duration_ms"`
+	MinDuration      float64 `json:"min_duration_ms"`
+	MaxDuration      float64 `json:"max_duration_ms"`
+	ErrorCount       int     `json:"error_count"`
+	OkCount          int     `json:"ok_count"`
+	UnknownCount     int     `json:"unknown_count"`
+	ErrorRate        float64 `json:"error_rate"`
+	TotalDuration    float64 `json:"total_duration_ms"`
+}
+
+type TraceTimeSeries struct {
+	Hour       string  `json:"hour"`
+	Count      int     `json:"count"`
+	AvgMs      float64 `json:"avg_ms"`
+	P95Ms      float64 `json:"p95_ms"`
+	ErrorCount int     `json:"error_count"`
+}
+
+type TraceOperationStats struct {
+	Operation string  `json:"operation"`
+	Count     int     `json:"count"`
+	AvgMs     float64 `json:"avg_ms"`
+	P95Ms     float64 `json:"p95_ms"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+func percentile(data []float64, p float64) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	sorted := make([]float64, len(data))
+	copy(sorted, data)
+	// Simple sort (for small datasets, this is fine)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[i] > sorted[j] {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+	index := int(float64(len(sorted)-1) * p / 100)
+	return sorted[index]
+}
+
+func GetTraceStats(db *sql.DB, projectID string, hours int) (*TraceStats, error) {
+	var timeFilter string
+	if hours > 0 {
+		timeFilter = fmt.Sprintf("AND start_timestamp >= datetime('now', '-%d hours', 'utc')", hours)
+	} else {
+		timeFilter = "AND start_timestamp >= datetime('now', '-24 hours', 'utc')"
+	}
+
+	projectFilter := ""
+	if projectID != "" {
+		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
+	}
+
+	// Get total count and basic stats
+	var stats TraceStats
+	query := fmt.Sprintf(`
+		SELECT 
+			COUNT(*) as total,
+			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_duration,
+			MIN((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as min_duration,
+			MAX((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as max_duration,
+			SUM((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as total_duration,
+			SUM(CASE WHEN status = 'error' OR status = 'internal_error' THEN 1 ELSE 0 END) as error_count,
+			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
+			SUM(CASE WHEN status IS NULL OR status = '' THEN 1 ELSE 0 END) as unknown_count
+		FROM spans
+		WHERE (parent_span_id IS NULL OR parent_span_id = '') %s %s
+	`, projectFilter, timeFilter)
+
+	err := db.QueryRow(query).Scan(
+		&stats.TotalTraces, &stats.AvgDuration, &stats.MinDuration,
+		&stats.MaxDuration, &stats.TotalDuration, &stats.ErrorCount,
+		&stats.OkCount, &stats.UnknownCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if stats.TotalTraces > 0 {
+		stats.ErrorRate = float64(stats.ErrorCount) / float64(stats.TotalTraces) * 100
+	}
+
+	// Calculate percentiles
+	if stats.TotalTraces > 0 {
+		percentileQuery := fmt.Sprintf(`
+			SELECT 
+				(julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
+			FROM spans
+			WHERE (parent_span_id IS NULL OR parent_span_id = '') %s %s
+			ORDER BY duration
+		`, projectFilter, timeFilter)
+
+		rows, err := db.Query(percentileQuery)
+		if err != nil {
+			return &stats, nil // Return basic stats even if percentiles fail
+		}
+		defer rows.Close()
+
+		var durations []float64
+		for rows.Next() {
+			var d float64
+			if err := rows.Scan(&d); err == nil {
+				durations = append(durations, d)
+			}
+		}
+
+		if len(durations) > 0 {
+			stats.P50Duration = percentile(durations, 50)
+			stats.P75Duration = percentile(durations, 75)
+			stats.P95Duration = percentile(durations, 95)
+			stats.P99Duration = percentile(durations, 99)
+		}
+	}
+
+	return &stats, nil
+}
+
+func GetTraceTimeSeries(db *sql.DB, projectID string, hours int) ([]TraceTimeSeries, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+
+	projectFilter := ""
+	if projectID != "" {
+		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			strftime('%%Y-%%m-%%d %%H:00:00', start_timestamp, 'utc') as hour,
+			COUNT(*) as count,
+			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_ms,
+			SUM(CASE WHEN status = 'error' OR status = 'internal_error' THEN 1 ELSE 0 END) as error_count
+		FROM spans
+		WHERE (parent_span_id IS NULL OR parent_span_id = '') 
+			AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
+		GROUP BY hour
+		ORDER BY hour
+	`, hours, projectFilter)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var series []TraceTimeSeries
+	for rows.Next() {
+		var ts TraceTimeSeries
+		var avgMs sql.NullFloat64
+		err := rows.Scan(&ts.Hour, &ts.Count, &avgMs, &ts.ErrorCount)
+		if err != nil {
+			continue
+		}
+		if avgMs.Valid {
+			ts.AvgMs = avgMs.Float64
+		}
+		series = append(series, ts)
+	}
+
+	// Calculate P95 for each hour
+	for i := range series {
+		p95Query := fmt.Sprintf(`
+			SELECT (julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
+			FROM spans
+			WHERE (parent_span_id IS NULL OR parent_span_id = '') 
+				AND strftime('%%Y-%%m-%%d %%H:00:00', start_timestamp, 'utc') = ? %s
+			ORDER BY duration
+		`, projectFilter)
+
+		p95Rows, err := db.Query(p95Query, series[i].Hour)
+		if err == nil {
+			var durations []float64
+			for p95Rows.Next() {
+				var d float64
+				if err := p95Rows.Scan(&d); err == nil {
+					durations = append(durations, d)
+				}
+			}
+			p95Rows.Close()
+			if len(durations) > 0 {
+				series[i].P95Ms = percentile(durations, 95)
+			}
+		}
+	}
+
+	return series, nil
+}
+
+func GetTraceOperationStats(db *sql.DB, projectID string, hours int, limit int) ([]TraceOperationStats, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	projectFilter := ""
+	if projectID != "" {
+		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			COALESCE(op, 'unknown') as operation,
+			COUNT(*) as count,
+			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_ms,
+			SUM(CASE WHEN status = 'error' OR status = 'internal_error' THEN 1 ELSE 0 END) as error_count
+		FROM spans
+		WHERE (parent_span_id IS NULL OR parent_span_id = '') 
+			AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
+		GROUP BY operation
+		ORDER BY count DESC
+		LIMIT ?
+	`, hours, projectFilter)
+
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []TraceOperationStats
+	for rows.Next() {
+		var s TraceOperationStats
+		var avgMs sql.NullFloat64
+		var errorCount int
+		err := rows.Scan(&s.Operation, &s.Count, &avgMs, &errorCount)
+		if err != nil {
+			continue
+		}
+		if avgMs.Valid {
+			s.AvgMs = avgMs.Float64
+		}
+		if s.Count > 0 {
+			s.ErrorRate = float64(errorCount) / float64(s.Count) * 100
+		}
+
+		// Calculate P95 for this operation
+		p95Query := fmt.Sprintf(`
+			SELECT (julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
+			FROM spans
+			WHERE (parent_span_id IS NULL OR parent_span_id = '') 
+				AND COALESCE(op, 'unknown') = ? 
+				AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
+			ORDER BY duration
+		`, hours, projectFilter)
+
+		p95Rows, err := db.Query(p95Query, s.Operation)
+		if err == nil {
+			var durations []float64
+			for p95Rows.Next() {
+				var d float64
+				if err := p95Rows.Scan(&d); err == nil {
+					durations = append(durations, d)
+				}
+			}
+			p95Rows.Close()
+			if len(durations) > 0 {
+				s.P95Ms = percentile(durations, 95)
+			}
+		}
+
+		stats = append(stats, s)
+	}
+
+	return stats, nil
+}

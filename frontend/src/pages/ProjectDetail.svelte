@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { navigate } from "../lib/router";
   import Link from "../components/Link.svelte";
-  import { api } from "../lib/api";
+  import { api, clearCache } from "../lib/api";
   import { toast } from "../stores/toast";
   import { ensureHttps } from "../lib/utils";
   import {
@@ -253,6 +253,11 @@
         });
       }
 
+      // Clear cache for project and settings
+      clearCache(`/projects/${projectId}`);
+      clearCache(`/projects/${projectId}/settings`);
+      clearCache('/projects');
+
       // Update local project state
       if (response?.project) {
         project = response.project;
@@ -474,6 +479,8 @@
         interval: 60,
         timeout: 30,
       };
+      // Clear cache before reloading
+      clearCache(`/projects/${projectId}/monitors`);
       await loadMonitors(true); // Force reload to show new monitor
     } catch (err) {
       toast.fromHttpError(err);
@@ -485,6 +492,8 @@
     try {
       await api.delete(`/projects/${projectId}/monitors/${monitorId}`);
       toast.success("Monitor deleted successfully");
+      // Clear cache before reloading
+      clearCache(`/projects/${projectId}/monitors`);
       await loadMonitors(true); // Force reload to reflect deletion
     } catch (err) {
       toast.fromHttpError(err);
