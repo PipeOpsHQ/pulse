@@ -847,9 +847,10 @@ type HourlyStat struct {
 func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 	// Initialize 24h of data
 	stats := make([]HourlyStat, 24)
-	now := time.Now()
+	now := time.Now().UTC()
 	for i := 0; i < 24; i++ {
 		t := now.Add(time.Duration(-(23 - i)) * time.Hour)
+		// Format to match SQLite strftime output (UTC)
 		stats[i] = HourlyStat{
 			Hour:   t.Format("2006-01-02 15:00:00"),
 			Errors: 0,
@@ -857,16 +858,16 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 		}
 	}
 
-	// Fetch Errors
-	errorQuery := `SELECT strftime('%Y-%m-%d %H:00:00', timestamp) as h, count(*)
+	// Fetch Errors - use UTC to match SQLite datetime
+	errorQuery := `SELECT strftime('%Y-%m-%d %H:00:00', datetime(timestamp, 'utc')) as h, count(*)
 				   FROM errors
-				   WHERE timestamp > datetime('now', '-24 hours') `
+				   WHERE datetime(timestamp, 'utc') > datetime('now', '-24 hours', 'utc') `
 	args := []interface{}{}
 	if projectID != "" {
 		errorQuery += " AND project_id = ? "
 		args = append(args, projectID)
 	}
-	errorQuery += " GROUP BY h"
+	errorQuery += " GROUP BY h ORDER BY h"
 
 	rows, err := db.Query(errorQuery, args...)
 	if err == nil {
@@ -875,6 +876,7 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 			var h string
 			var count int
 			if err := rows.Scan(&h, &count); err == nil {
+				// Find matching hour slot
 				for i := range stats {
 					if stats[i].Hour == h {
 						stats[i].Errors = count
@@ -883,18 +885,21 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 				}
 			}
 		}
+	} else {
+		// Log error for debugging
+		log.Printf("Error fetching hourly error stats: %v", err)
 	}
 
-	// Fetch Traces (Root Spans)
-	traceQuery := `SELECT strftime('%Y-%m-%d %H:00:00', start_timestamp) as h, count(*)
+	// Fetch Traces (Root Spans) - use UTC to match SQLite datetime
+	traceQuery := `SELECT strftime('%Y-%m-%d %H:00:00', datetime(start_timestamp, 'utc')) as h, count(*)
 				   FROM spans
-				   WHERE start_timestamp > datetime('now', '-24 hours') AND parent_span_id = '' `
+				   WHERE datetime(start_timestamp, 'utc') > datetime('now', '-24 hours', 'utc') AND (parent_span_id = '' OR parent_span_id IS NULL) `
 	args = []interface{}{}
 	if projectID != "" {
 		traceQuery += " AND project_id = ? "
 		args = append(args, projectID)
 	}
-	traceQuery += " GROUP BY h"
+	traceQuery += " GROUP BY h ORDER BY h"
 
 	rows, err = db.Query(traceQuery, args...)
 	if err == nil {
@@ -903,6 +908,7 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 			var h string
 			var count int
 			if err := rows.Scan(&h, &count); err == nil {
+				// Find matching hour slot
 				for i := range stats {
 					if stats[i].Hour == h {
 						stats[i].Traces = count
@@ -911,6 +917,9 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 				}
 			}
 		}
+	} else {
+		// Log error for debugging
+		log.Printf("Error fetching hourly trace stats: %v", err)
 	}
 
 	return stats, nil
