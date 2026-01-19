@@ -33,7 +33,6 @@ Thumbs.db
 
 # Logs
 *.log
-
 sentry-alt
 server.pid
 .env
