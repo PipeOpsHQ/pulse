@@ -13,7 +13,7 @@ import (
 func GetErrorGroups(db *sql.DB, projectID string, limit int, cursor string, status string) ([]map[string]interface{}, string, bool, error) {
 	// Build the base query for grouped errors
 	baseQuery := `
-		SELECT 
+		SELECT
 			fingerprint,
 			message,
 			level,
@@ -35,14 +35,15 @@ func GetErrorGroups(db *sql.DB, projectID string, limit int, cursor string, stat
 		args = append(args, status)
 	}
 
-	// Cursor-based pagination on last_seen
+	baseQuery += " GROUP BY fingerprint, message, level, status, project_id, environment, platform"
+
+	// Cursor-based pagination on last_seen using HAVING clause
 	if cursor != "" {
-		baseQuery += " AND MAX(created_at) < ?"
+		baseQuery += " HAVING MAX(created_at) < ?"
 		args = append(args, cursor)
 	}
 
-	baseQuery += " GROUP BY fingerprint, message, level, status, project_id, environment, platform"
-	baseQuery += " ORDER BY MAX(created_at) DESC LIMIT ?"
+	baseQuery += " ORDER BY last_seen DESC LIMIT ?"
 	args = append(args, limit+1)
 
 	rows, err := db.Query(baseQuery, args...)
@@ -135,10 +136,10 @@ func getUserCountsByFingerprint(db *sql.DB, projectID string, fingerprints []str
 	placeholders = placeholders[:len(placeholders)-1]
 
 	query := `
-		SELECT fingerprint, COUNT(DISTINCT user) 
-		FROM errors 
-		WHERE project_id = ? AND fingerprint IN (` + placeholders + `) 
-		AND user IS NOT NULL AND user != '' AND user != '{}' 
+		SELECT fingerprint, COUNT(DISTINCT user)
+		FROM errors
+		WHERE project_id = ? AND fingerprint IN (` + placeholders + `)
+		AND user IS NOT NULL AND user != '' AND user != '{}'
 		GROUP BY fingerprint`
 
 	args := []interface{}{projectID}
@@ -174,12 +175,12 @@ func getTimelinesByFingerprint(db *sql.DB, projectID string, fingerprints []stri
 
 	// Get hourly counts for the last 24 hours
 	query := `
-		SELECT 
+		SELECT
 			fingerprint,
 			strftime('%Y-%m-%d %H:00:00', created_at) as hour,
 			COUNT(*) as count
 		FROM errors
-		WHERE project_id = ? 
+		WHERE project_id = ?
 		AND fingerprint IN (` + placeholders + `)
 		AND created_at >= datetime('now', '-' || ? || ' hours')
 		GROUP BY fingerprint, hour
@@ -219,7 +220,7 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 	// Get group summary
 	var g ErrorGroup
 	err := db.QueryRow(`
-		SELECT 
+		SELECT
 			fingerprint,
 			message,
 			level,
@@ -247,8 +248,8 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 	// Get user count
 	var userCount int
 	db.QueryRow(`
-		SELECT COUNT(DISTINCT user) 
-		FROM errors 
+		SELECT COUNT(DISTINCT user)
+		FROM errors
 		WHERE project_id = ? AND fingerprint = ?
 		AND user IS NOT NULL AND user != '' AND user != '{}'`,
 		projectID, fingerprint,
@@ -256,9 +257,9 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 
 	// Get all occurrences
 	occurrences, err := db.Query(`
-		SELECT id, project_id, message, level, environment, release, platform, 
+		SELECT id, project_id, message, level, environment, release, platform,
 		       timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at
-		FROM errors 
+		FROM errors
 		WHERE project_id = ? AND fingerprint = ?
 		ORDER BY created_at DESC
 		LIMIT ?`,
