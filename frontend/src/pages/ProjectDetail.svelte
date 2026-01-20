@@ -110,7 +110,7 @@
       const [projectData, errorsData, historyData, monitorsData] =
         await Promise.all([
           api.get(`/projects/${projectId}`),
-          api.get(`/projects/${projectId}/errors`),
+          api.get(`/projects/${projectId}/errors?grouped=true`),
           api.get(`/projects/${projectId}/coverage/history`),
           api.get(`/projects/${projectId}/monitors`).catch(() => []),
         ]);
@@ -1048,7 +1048,7 @@ Sentry.init({
                 </h2>
                 <span
                   class="rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white tracking-widest uppercase"
-                  >{errors.length} detected</span
+                  >{errors.length} {errors.length === 1 ? 'issue' : 'issues'}</span
                 >
               </div>
 
@@ -1061,7 +1061,7 @@ Sentry.init({
                     </p>
                   </div>
                 {:else}
-                  {#each errors as error}
+                  {#each errors.slice(0, 10) as error}
                     <Link
                       to="/errors/{error.id}"
                       class="group flex items-center gap-4 p-4 transition-all hover:bg-white/5"
@@ -1072,7 +1072,7 @@ Sentry.init({
                       ></div>
                       <div class="min-w-0 flex-1">
                         <div
-                          class="truncate text-sm font-semibold text-white group-hover:text-pulse-400 transition-colors uppercase tracking-tight"
+                          class="truncate text-sm font-semibold text-white group-hover:text-pulse-400 transition-colors tracking-tight"
                         >
                           {error.message || "No message"}
                         </div>
@@ -1082,8 +1082,16 @@ Sentry.init({
                           <span class="text-slate-400 font-bold"
                             >{error.environment || "PROD"}</span
                           >
+                          {#if error.event_count && error.event_count > 1}
+                            <span>•</span>
+                            <span class="text-pulse-400 font-bold">{error.event_count} events</span>
+                          {/if}
+                          {#if error.user_count && error.user_count > 0}
+                            <span>•</span>
+                            <span class="text-amber-400 font-bold">{error.user_count} {error.user_count === 1 ? 'user' : 'users'}</span>
+                          {/if}
                           <span>•</span>
-                          <span>{formatDate(error.created_at)}</span>
+                          <span title="Last seen">{formatDate(error.last_seen || error.created_at)}</span>
                         </div>
                       </div>
                       <ChevronIcon
@@ -1608,8 +1616,20 @@ Sentry.init({
                           >{error.environment}</span
                         >
                       {/if}
+                      {#if error.event_count && error.event_count > 1}
+                        <span>•</span>
+                        <span class="text-pulse-400 font-bold">{error.event_count} events</span>
+                      {/if}
+                      {#if error.user_count && error.user_count > 0}
+                        <span>•</span>
+                        <span class="text-amber-400 font-bold">{error.user_count} {error.user_count === 1 ? 'user' : 'users'}</span>
+                      {/if}
                       <span>•</span>
-                      <span>{formatDate(error.created_at)}</span>
+                      <span title="Last seen">{formatDate(error.last_seen || error.created_at)}</span>
+                      {#if error.first_seen && error.first_seen !== error.last_seen}
+                        <span>•</span>
+                        <span class="text-slate-600" title="First seen">{formatDate(error.first_seen)}</span>
+                      {/if}
                     </div>
                   </div>
                   <ChevronIcon

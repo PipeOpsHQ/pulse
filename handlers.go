@@ -442,7 +442,9 @@ func getProjectErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Parse pagination parameters
 	limit := 50
 	offset := 0
+	cursor := r.URL.Query().Get("cursor")
 	status := r.URL.Query().Get("status")
+	grouped := r.URL.Query().Get("grouped") == "true"
 
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
@@ -454,6 +456,29 @@ func getProjectErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
 			offset = parsed
 		}
+	}
+
+	// Use grouped view if requested
+	if grouped {
+		errors, nextCursor, hasMore, err := GetErrorGroups(db, projectID, limit, cursor, status)
+		if err != nil {
+			http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"data": errors,
+			"meta": map[string]interface{}{
+				"limit":    limit,
+				"cursor":   nextCursor,
+				"has_more": hasMore,
+				"grouped":  true,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
 	}
 
 	errors, total, err := GetErrors(db, projectID, limit, offset, status)
