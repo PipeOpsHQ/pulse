@@ -2153,22 +2153,13 @@ func percentile(data []float64, p float64) float64 {
 }
 
 func GetTraceStats(db *sql.DB, projectID string, hours int) (*TraceStats, error) {
-	var timeFilter string
-	if hours > 0 {
-		timeFilter = fmt.Sprintf("AND start_timestamp >= datetime('now', '-%d hours', 'utc')", hours)
-	} else {
-		timeFilter = "AND start_timestamp >= datetime('now', '-24 hours', 'utc')"
+	if hours <= 0 {
+		hours = 24
 	}
 
-	projectFilter := ""
-	if projectID != "" {
-		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
-	}
-
-	// Get total count and basic stats
-	var stats TraceStats
-	query := fmt.Sprintf(`
-		SELECT 
+	// Use parameterized queries to prevent SQL injection
+	baseQuery := `
+		SELECT
 			COUNT(*) as total,
 			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_duration,
 			MIN((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as min_duration,
@@ -2178,10 +2169,20 @@ func GetTraceStats(db *sql.DB, projectID string, hours int) (*TraceStats, error)
 			SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as ok_count,
 			SUM(CASE WHEN status IS NULL OR status = '' THEN 1 ELSE 0 END) as unknown_count
 		FROM spans
-		WHERE (parent_span_id IS NULL OR parent_span_id = '') %s %s
-	`, projectFilter, timeFilter)
+		WHERE (parent_span_id IS NULL OR parent_span_id = '')
+			AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')`
 
-	err := db.QueryRow(query).Scan(
+	var args []interface{}
+	args = append(args, hours)
+
+	if projectID != "" {
+		baseQuery += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+
+	// Get total count and basic stats
+	var stats TraceStats
+	err := db.QueryRow(baseQuery, args...).Scan(
 		&stats.TotalTraces, &stats.AvgDuration, &stats.MinDuration,
 		&stats.MaxDuration, &stats.TotalDuration, &stats.ErrorCount,
 		&stats.OkCount, &stats.UnknownCount,
@@ -2194,17 +2195,23 @@ func GetTraceStats(db *sql.DB, projectID string, hours int) (*TraceStats, error)
 		stats.ErrorRate = float64(stats.ErrorCount) / float64(stats.TotalTraces) * 100
 	}
 
-	// Calculate percentiles
+	// Calculate percentiles using parameterized query
 	if stats.TotalTraces > 0 {
-		percentileQuery := fmt.Sprintf(`
-			SELECT 
+		percentileQuery := `
+			SELECT
 				(julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
 			FROM spans
-			WHERE (parent_span_id IS NULL OR parent_span_id = '') %s %s
-			ORDER BY duration
-		`, projectFilter, timeFilter)
+			WHERE (parent_span_id IS NULL OR parent_span_id = '')
+				AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')`
 
-		rows, err := db.Query(percentileQuery)
+		percentileArgs := []interface{}{hours}
+		if projectID != "" {
+			percentileQuery += " AND project_id = ?"
+			percentileArgs = append(percentileArgs, projectID)
+		}
+		percentileQuery += " ORDER BY duration"
+
+		rows, err := db.Query(percentileQuery, percentileArgs...)
 		if err != nil {
 			return &stats, nil // Return basic stats even if percentiles fail
 		}
@@ -2234,31 +2241,37 @@ func GetTraceTimeSeries(db *sql.DB, projectID string, hours int) ([]TraceTimeSer
 		hours = 24
 	}
 
-	projectFilter := ""
-	if projectID != "" {
-		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
-	}
-
-	query := fmt.Sprintf(`
-		SELECT 
-			strftime('%%Y-%%m-%%d %%H:00:00', start_timestamp, 'utc') as hour,
+	// Use parameterized query to prevent SQL injection
+	baseQuery := `
+		SELECT
+			strftime('%Y-%m-%d %H:00:00', start_timestamp, 'utc') as hour,
 			COUNT(*) as count,
 			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_ms,
 			SUM(CASE WHEN status = 'error' OR status = 'internal_error' THEN 1 ELSE 0 END) as error_count
 		FROM spans
-		WHERE (parent_span_id IS NULL OR parent_span_id = '') 
-			AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
-		GROUP BY hour
-		ORDER BY hour
-	`, hours, projectFilter)
+		WHERE (parent_span_id IS NULL OR parent_span_id = '')
+			AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')`
 
-	rows, err := db.Query(query)
+	var args []interface{}
+	args = append(args, hours)
+
+	if projectID != "" {
+		baseQuery += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+
+	baseQuery += `
+		GROUP BY hour
+		ORDER BY hour`
+
+	rows, err := db.Query(baseQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var series []TraceTimeSeries
+	var hoursList []string
 	for rows.Next() {
 		var ts TraceTimeSeries
 		var avgMs sql.NullFloat64
@@ -2269,31 +2282,55 @@ func GetTraceTimeSeries(db *sql.DB, projectID string, hours int) ([]TraceTimeSer
 		if avgMs.Valid {
 			ts.AvgMs = avgMs.Float64
 		}
+		hoursList = append(hoursList, ts.Hour)
 		series = append(series, ts)
 	}
 
-	// Calculate P95 for each hour
-	for i := range series {
-		p95Query := fmt.Sprintf(`
-			SELECT (julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
+	// Batch calculate P95 for all hours in a single query (fixes N+1 problem)
+	if len(hoursList) > 0 {
+		p95BaseQuery := `
+			SELECT
+				strftime('%Y-%m-%d %H:00:00', start_timestamp, 'utc') as hour,
+				(julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
 			FROM spans
-			WHERE (parent_span_id IS NULL OR parent_span_id = '') 
-				AND strftime('%%Y-%%m-%%d %%H:00:00', start_timestamp, 'utc') = ? %s
-			ORDER BY duration
-		`, projectFilter)
+			WHERE (parent_span_id IS NULL OR parent_span_id = '')
+				AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')
+				AND strftime('%Y-%m-%d %H:00:00', start_timestamp, 'utc') IN (`
 
-		p95Rows, err := db.Query(p95Query, series[i].Hour)
+		p95Args := []interface{}{hours}
+		placeholders := make([]string, len(hoursList))
+		for i, h := range hoursList {
+			placeholders[i] = "?"
+			p95Args = append(p95Args, h)
+		}
+		p95BaseQuery += strings.Join(placeholders, ",") + ") ORDER BY hour, duration"
+
+		if projectID != "" {
+			// Insert projectID before ORDER BY
+			insertPos := len(p95Args) - len(hoursList)
+			p95BaseQuery = strings.Replace(p95BaseQuery, "ORDER BY", "AND project_id = ? ORDER BY", 1)
+			p95Args = append(p95Args[:insertPos], append([]interface{}{projectID}, p95Args[insertPos:]...)...)
+		}
+
+		p95Rows, err := db.Query(p95BaseQuery, p95Args...)
 		if err == nil {
-			var durations []float64
+			defer p95Rows.Close()
+
+			// Group durations by hour
+			durationsByHour := make(map[string][]float64)
 			for p95Rows.Next() {
+				var hour string
 				var d float64
-				if err := p95Rows.Scan(&d); err == nil {
-					durations = append(durations, d)
+				if err := p95Rows.Scan(&hour, &d); err == nil {
+					durationsByHour[hour] = append(durationsByHour[hour], d)
 				}
 			}
-			p95Rows.Close()
-			if len(durations) > 0 {
-				series[i].P95Ms = percentile(durations, 95)
+
+			// Calculate P95 for each hour
+			for i := range series {
+				if durations, ok := durationsByHour[series[i].Hour]; ok && len(durations) > 0 {
+					series[i].P95Ms = percentile(durations, 95)
+				}
 			}
 		}
 	}
@@ -2309,31 +2346,39 @@ func GetTraceOperationStats(db *sql.DB, projectID string, hours int, limit int) 
 		limit = 10
 	}
 
-	projectFilter := ""
-	if projectID != "" {
-		projectFilter = fmt.Sprintf("AND project_id = '%s'", projectID)
-	}
-
-	query := fmt.Sprintf(`
-		SELECT 
+	// Use parameterized query to prevent SQL injection
+	baseQuery := `
+		SELECT
 			COALESCE(op, 'unknown') as operation,
 			COUNT(*) as count,
 			AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000) as avg_ms,
 			SUM(CASE WHEN status = 'error' OR status = 'internal_error' THEN 1 ELSE 0 END) as error_count
 		FROM spans
-		WHERE (parent_span_id IS NULL OR parent_span_id = '') 
-			AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
+		WHERE (parent_span_id IS NULL OR parent_span_id = '')
+			AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')`
+
+	var args []interface{}
+	args = append(args, hours)
+
+	if projectID != "" {
+		baseQuery += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+
+	baseQuery += `
 		GROUP BY operation
 		ORDER BY count DESC
-		LIMIT ?
-	`, hours, projectFilter)
+		LIMIT ?`
+	args = append(args, limit)
 
-	rows, err := db.Query(query, limit)
+	rows, err := db.Query(baseQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	// Collect all operations first
+	var operations []string
 	var stats []TraceOperationStats
 	for rows.Next() {
 		var s TraceOperationStats
@@ -2349,33 +2394,58 @@ func GetTraceOperationStats(db *sql.DB, projectID string, hours int, limit int) 
 		if s.Count > 0 {
 			s.ErrorRate = float64(errorCount) / float64(s.Count) * 100
 		}
+		operations = append(operations, s.Operation)
+		stats = append(stats, s)
+	}
 
-		// Calculate P95 for this operation
-		p95Query := fmt.Sprintf(`
-			SELECT (julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
+	// Batch calculate P95 for all operations in a single query (fixes N+1 problem)
+	if len(operations) > 0 {
+		// Build a query to get all durations for all operations at once
+		p95BaseQuery := `
+			SELECT
+				COALESCE(op, 'unknown') as operation,
+				(julianday(timestamp) - julianday(start_timestamp)) * 86400000 as duration
 			FROM spans
-			WHERE (parent_span_id IS NULL OR parent_span_id = '') 
-				AND COALESCE(op, 'unknown') = ? 
-				AND start_timestamp >= datetime('now', '-%d hours', 'utc') %s
-			ORDER BY duration
-		`, hours, projectFilter)
+			WHERE (parent_span_id IS NULL OR parent_span_id = '')
+				AND start_timestamp >= datetime('now', '-' || ? || ' hours', 'utc')
+				AND COALESCE(op, 'unknown') IN (`
 
-		p95Rows, err := db.Query(p95Query, s.Operation)
-		if err == nil {
-			var durations []float64
-			for p95Rows.Next() {
-				var d float64
-				if err := p95Rows.Scan(&d); err == nil {
-					durations = append(durations, d)
-				}
-			}
-			p95Rows.Close()
-			if len(durations) > 0 {
-				s.P95Ms = percentile(durations, 95)
-			}
+		p95Args := []interface{}{hours}
+		placeholders := make([]string, len(operations))
+		for i, op := range operations {
+			placeholders[i] = "?"
+			p95Args = append(p95Args, op)
+		}
+		p95BaseQuery += strings.Join(placeholders, ",") + ") ORDER BY operation, duration"
+
+		if projectID != "" {
+			p95BaseQuery = strings.Replace(p95BaseQuery, "ORDER BY", "AND project_id = ? ORDER BY", 1)
+			// Insert projectID before ORDER BY
+			insertPos := len(p95Args) - len(operations)
+			p95Args = append(p95Args[:insertPos], append([]interface{}{projectID}, p95Args[insertPos:]...)...)
 		}
 
-		stats = append(stats, s)
+		p95Rows, err := db.Query(p95BaseQuery, p95Args...)
+		if err == nil {
+			defer p95Rows.Close()
+
+			// Group durations by operation
+			durationsByOp := make(map[string][]float64)
+			for p95Rows.Next() {
+				var op string
+				var d float64
+				if err := p95Rows.Scan(&op, &d); err == nil {
+					durationsByOp[op] = append(durationsByOp[op], d)
+				}
+			}
+
+			// Calculate P95 for each operation
+			for i := range stats {
+				if durations, ok := durationsByOp[stats[i].Operation]; ok && len(durations) > 0 {
+					stats[i].P95Ms = percentile(durations, 95)
+				}
+			}
+		}
 	}
 
 	return stats, nil

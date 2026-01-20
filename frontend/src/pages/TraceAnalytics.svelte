@@ -23,8 +23,12 @@
   onMount(async () => {
     await loadProjects();
     await loadData();
-    // Refresh every 30 seconds
-    refreshInterval = setInterval(loadData, 30000);
+    // Refresh every 60 seconds, only when page is visible
+    refreshInterval = setInterval(() => {
+      if (!document.hidden) {
+        loadData();
+      }
+    }, 60000);
   });
 
   onDestroy(() => {

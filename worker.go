@@ -136,8 +136,8 @@ func flushErrorBatch(db *sql.DB) {
 
 func StartMonitorWorker(db *sql.DB) {
 	log.Println("Starting uptime monitor worker...")
-	// Check every 10 seconds for monitors that need checking
-	ticker := time.NewTicker(10 * time.Second)
+	// Check every 30 seconds for monitors that need checking (optimized from 10s to reduce CPU usage)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {

@@ -301,12 +301,12 @@
 
     await loadProjectData(true); // Initial load
 
-    // Set up real-time polling every 10 seconds
+    // Set up real-time polling every 60 seconds (optimized from 10s to reduce CPU usage)
     refreshInterval = setInterval(async () => {
       if (!document.hidden && projectId) {
         await loadProjectData(false); // Background refresh, no loading state
       }
-    }, 10000);
+    }, 60000);
   });
 
   onDestroy(() => {
