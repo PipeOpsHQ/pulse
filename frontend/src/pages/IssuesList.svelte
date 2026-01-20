@@ -81,7 +81,7 @@
     }
     try {
       const status = activeTab === "unresolved" ? "unresolved" : activeTab;
-      let url = `/errors?status=${status}&limit=50&use_cursor=true`;
+      let url = `/errors?status=${status}&limit=50&use_cursor=true&grouped=true`;
       if (cursor) {
         url += `&cursor=${encodeURIComponent(cursor)}`;
       }
@@ -353,7 +353,11 @@
                   >
                 {/if}
                 <span>•</span>
-                <span>{formatDate(issue.created_at)}</span>
+                <span title="Last seen">{formatDate(issue.last_seen || issue.created_at)}</span>
+                {#if issue.first_seen && issue.first_seen !== issue.last_seen}
+                  <span>•</span>
+                  <span class="text-slate-600" title="First seen">{formatDate(issue.first_seen)}</span>
+                {/if}
               </div>
             </div>
 

@@ -29,12 +29,12 @@ type ErrorBatch struct {
 }
 
 var (
-	errorBatchChan  = make(chan ErrorBatch, 1000)
-	batchMutex      sync.Mutex
-	pendingErrors   []ErrorBatch
-	lastBatchTime   time.Time
-	batchSize       = 100
-	batchInterval   = 100 * time.Millisecond
+	errorBatchChan = make(chan ErrorBatch, 1000)
+	batchMutex     sync.Mutex
+	pendingErrors  []ErrorBatch
+	lastBatchTime  time.Time
+	batchSize      = 100
+	batchInterval  = 100 * time.Millisecond
 )
 
 func StartErrorBatchInserter(db *sql.DB) {
@@ -93,7 +93,7 @@ func flushErrorBatch(db *sql.DB) {
 		return
 	}
 
-	stmt, err := tx.Prepare(`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		tx.Rollback()
 		log.Printf("Failed to prepare batch statement: %v", err)
@@ -107,10 +107,15 @@ func flushErrorBatch(db *sql.DB) {
 
 	projectCounts := make(map[string]int)
 	for _, eb := range errorsToInsert {
+		// Generate fingerprint if not set
+		if eb.Event.Fingerprint == "" {
+			eb.Event.Fingerprint = generateFingerprint(eb.Event)
+		}
+
 		_, err := stmt.Exec(
 			eb.Event.ID, eb.Event.ProjectID, eb.Event.Message, eb.Event.Level, eb.Event.Environment,
 			eb.Event.Release, eb.Event.Platform, eb.Event.Timestamp, eb.Event.Stacktrace, eb.Event.Context,
-			eb.Event.User, eb.Event.Tags, eb.Event.Status, eb.Event.TraceID, eb.Event.CreatedAt,
+			eb.Event.User, eb.Event.Tags, eb.Event.Status, eb.Event.TraceID, eb.Event.Fingerprint, eb.Event.CreatedAt,
 		)
 		if err != nil {
 			log.Printf("Failed to insert error in batch: %v", err)

@@ -347,6 +347,7 @@ func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	status := r.URL.Query().Get("status")
 	cursor := r.URL.Query().Get("cursor")
 	useCursor := cursor != "" || r.URL.Query().Get("use_cursor") == "true"
+	grouped := r.URL.Query().Get("grouped") == "true" // New parameter for grouped view
 
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
@@ -361,6 +362,29 @@ func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var hasMore bool
 	var total int
 	var offset int
+
+	// Use grouped view if requested
+	if grouped && projectID != "" {
+		errors, nextCursor, hasMore, err = GetErrorGroups(db, projectID, limit, cursor, status)
+		if err != nil {
+			http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"data": errors,
+			"meta": map[string]interface{}{
+				"limit":    limit,
+				"cursor":   nextCursor,
+				"has_more": hasMore,
+				"grouped":  true,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
 
 	if useCursor {
 		// Use cursor-based pagination (preferred for performance)
@@ -470,13 +494,54 @@ func getErrorOccurrences(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	// First get the error to get the message and project_id for grouping
+	// Check if requesting by fingerprint
+	fingerprint := r.URL.Query().Get("fingerprint")
+	projectID := r.URL.Query().Get("projectId")
+
+	if fingerprint != "" && projectID != "" {
+		// Get error group by fingerprint
+		groupData, occurrences, err := GetErrorGroupByFingerprint(db, projectID, fingerprint, 100)
+		if err != nil {
+			http.Error(w, "Error group not found", http.StatusNotFound)
+			return
+		}
+
+		response := map[string]interface{}{
+			"group":       groupData,
+			"occurrences": occurrences,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// First get the error to get the fingerprint and project_id for grouping
 	errorEvent, err := GetError(db, id)
 	if err != nil {
 		http.Error(w, "Error not found", http.StatusNotFound)
 		return
 	}
 
+	// If error has fingerprint, use it for better grouping
+	if errorEvent.Fingerprint != "" {
+		groupData, occurrences, err := GetErrorGroupByFingerprint(db, errorEvent.ProjectID, errorEvent.Fingerprint, 100)
+		if err != nil {
+			http.Error(w, "Failed to fetch error group", http.StatusInternalServerError)
+			return
+		}
+
+		response := map[string]interface{}{
+			"group":       groupData,
+			"occurrences": occurrences,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Fallback to message-based grouping for legacy errors
 	occurrences, err := GetErrorOccurrences(db, errorEvent.Message, errorEvent.ProjectID, 50)
 	if err != nil {
 		http.Error(w, "Failed to fetch occurrences", http.StatusInternalServerError)

@@ -90,6 +90,23 @@
         return;
       }
 
+      // Load grouped occurrences if fingerprint is available
+      if (error.fingerprint && error.project_id) {
+        try {
+          const groupResponse = await api.get(`/errors/${errorId}/occurrences?fingerprint=${error.fingerprint}&projectId=${error.project_id}`);
+          if (groupResponse.group && groupResponse.occurrences) {
+            // Merge group info into error
+            error.event_count = groupResponse.group.event_count;
+            error.user_count = groupResponse.group.user_count;
+            error.first_seen = groupResponse.group.first_seen;
+            error.last_seen = groupResponse.group.last_seen;
+            occurrences = groupResponse.occurrences || [];
+          }
+        } catch (e) {
+          console.error("Failed to load error group:", e);
+        }
+      }
+
       if (error.project_id) {
         try {
           project = await api.get(`/projects/${error.project_id}`);

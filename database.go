@@ -50,7 +50,24 @@ type ErrorEvent struct {
 	Tags        string    `json:"tags"`
 	Status      string    `json:"status"`
 	TraceID     string    `json:"trace_id,omitempty"`
+	Fingerprint string    `json:"fingerprint,omitempty"` // For grouping similar errors
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ErrorGroup represents a grouped set of similar errors
+type ErrorGroup struct {
+	Fingerprint      string    `json:"fingerprint"`
+	Message          string    `json:"message"`
+	Level            string    `json:"level"`
+	Status           string    `json:"status"`
+	ProjectID        string    `json:"project_id"`
+	FirstSeen        time.Time `json:"first_seen"`
+	LastSeen         time.Time `json:"last_seen"`
+	EventCount       int       `json:"event_count"`
+	UserCount        int       `json:"user_count"`
+	Environment      string    `json:"environment"`
+	Platform         string    `json:"platform"`
+	RepresentativeID string    `json:"representative_id"` // ID of a sample event
 }
 
 type FileCoverage struct {
@@ -137,6 +154,7 @@ func InitDB() (*sql.DB, error) {
 		user TEXT,
 		tags TEXT,
 		status TEXT DEFAULT 'unresolved',
+		fingerprint TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (project_id) REFERENCES projects(id)
 	);`
@@ -310,6 +328,7 @@ func InitDB() (*sql.DB, error) {
 	db.Exec("ALTER TABLE projects ADD COLUMN coverage_updated_at DATETIME;")
 	db.Exec("ALTER TABLE monitors ADD COLUMN timeout INTEGER DEFAULT 30;")
 	db.Exec("ALTER TABLE errors ADD COLUMN trace_id TEXT;")
+	db.Exec("ALTER TABLE errors ADD COLUMN fingerprint TEXT;")
 
 	// SQLite Performance Optimizations
 	db.Exec("PRAGMA journal_mode = WAL;")
@@ -326,6 +345,8 @@ func InitDB() (*sql.DB, error) {
 		"CREATE INDEX IF NOT EXISTS idx_errors_timestamp ON errors(timestamp);",
 		"CREATE INDEX IF NOT EXISTS idx_errors_created_at ON errors(created_at DESC);",
 		"CREATE INDEX IF NOT EXISTS idx_errors_trace_id ON errors(trace_id);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_fingerprint ON errors(project_id, fingerprint, created_at DESC);",
+		"CREATE INDEX IF NOT EXISTS idx_errors_project_fingerprint_status ON errors(project_id, fingerprint, status);",
 		"CREATE INDEX IF NOT EXISTS idx_spans_project_timestamp ON spans(project_id, start_timestamp DESC);",
 		"CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id);",
 		"CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans(parent_span_id);",
@@ -556,12 +577,17 @@ func InsertError(db *sql.DB, event *ErrorEvent) error {
 	}
 	defer tx.Rollback()
 
+	// Generate fingerprint if not set
+	if event.Fingerprint == "" {
+		event.Fingerprint = generateFingerprint(event)
+	}
+
 	_, err = tx.Exec(
-		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO errors (id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.ProjectID, event.Message, event.Level, event.Environment,
 		event.Release, event.Platform, event.Timestamp, event.Stacktrace, event.Context,
-		event.User, event.Tags, event.Status, event.TraceID, event.CreatedAt,
+		event.User, event.Tags, event.Status, event.TraceID, event.Fingerprint, event.CreatedAt,
 	)
 	if err != nil {
 		return err
@@ -573,6 +599,22 @@ func InsertError(db *sql.DB, event *ErrorEvent) error {
 	}
 
 	return tx.Commit()
+}
+
+// generateFingerprint creates a unique identifier for grouping similar errors
+func generateFingerprint(event *ErrorEvent) string {
+	// For now, use message + level + platform as fingerprint
+	// In production, you might want to use stacktrace hashing for more accurate grouping
+	fingerprint := fmt.Sprintf("%s:%s:%s", event.Message, event.Level, event.Platform)
+
+	// Create a simple hash of the fingerprint
+	hash := 0
+	for _, char := range fingerprint {
+		hash = ((hash << 5) - hash) + int(char)
+		hash = hash & 0x7FFFFFFF // Convert to 32bit integer
+	}
+
+	return fmt.Sprintf("%x", hash)
 }
 
 // GetErrorsLightweight returns errors without stacktrace and context fields for list views
@@ -695,16 +737,17 @@ func normalizeUUID(id string) (string, string) {
 
 func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 	var e ErrorEvent
+	var fingerprint sql.NullString
 
 	// Try the ID as-is first
 	err := db.QueryRow(
-		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
+		`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at
 		 FROM errors WHERE id = ?`,
 		id,
 	).Scan(
 		&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
 		&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
-		&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
+		&e.User, &e.Tags, &e.Status, &e.TraceID, &fingerprint, &e.CreatedAt,
 	)
 
 	// If not found and ID might be in different UUID format, try alternative
@@ -712,13 +755,13 @@ func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 		_, altID := normalizeUUID(id)
 		if altID != "" && altID != id {
 			err = db.QueryRow(
-				`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, created_at
+				`SELECT id, project_id, message, level, environment, release, platform, timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at
 				 FROM errors WHERE id = ?`,
 				altID,
 			).Scan(
 				&e.ID, &e.ProjectID, &e.Message, &e.Level, &e.Environment,
 				&e.Release, &e.Platform, &e.Timestamp, &e.Stacktrace, &e.Context,
-				&e.User, &e.Tags, &e.Status, &e.TraceID, &e.CreatedAt,
+				&e.User, &e.Tags, &e.Status, &e.TraceID, &fingerprint, &e.CreatedAt,
 			)
 		}
 	}
@@ -726,6 +769,11 @@ func GetError(db *sql.DB, id string) (*ErrorEvent, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if fingerprint.Valid {
+		e.Fingerprint = fingerprint.String
+	}
+
 	return &e, nil
 }
 
@@ -774,25 +822,36 @@ func GetErrorWithStats(db *sql.DB, id string) (map[string]interface{}, error) {
 		db.QueryRow("SELECT COUNT(DISTINCT trace_id) FROM spans WHERE trace_id = ? AND (parent_span_id IS NULL OR parent_span_id = '')", e.TraceID).Scan(&linkedTracesCount)
 	}
 
+	// Get first and last seen for this error group
+	var firstSeen, lastSeen time.Time
+	if e.Fingerprint != "" {
+		db.QueryRow("SELECT MIN(created_at), MAX(created_at) FROM errors WHERE fingerprint = ? AND project_id = ?", e.Fingerprint, e.ProjectID).Scan(&firstSeen, &lastSeen)
+	} else {
+		db.QueryRow("SELECT MIN(created_at), MAX(created_at) FROM errors WHERE message = ? AND project_id = ?", e.Message, e.ProjectID).Scan(&firstSeen, &lastSeen)
+	}
+
 	return map[string]interface{}{
-		"id":                 e.ID,
-		"project_id":         e.ProjectID,
-		"message":            e.Message,
-		"level":              e.Level,
-		"environment":        e.Environment,
-		"release":            e.Release,
-		"platform":           e.Platform,
-		"timestamp":          e.Timestamp,
-		"stacktrace":         e.Stacktrace,
-		"context":            e.Context,
-		"user":               e.User,
-		"tags":               e.Tags,
-		"status":             e.Status,
-		"trace_id":           e.TraceID,
+		"id":                  e.ID,
+		"project_id":          e.ProjectID,
+		"message":             e.Message,
+		"level":               e.Level,
+		"environment":         e.Environment,
+		"release":             e.Release,
+		"platform":            e.Platform,
+		"timestamp":           e.Timestamp,
+		"stacktrace":          e.Stacktrace,
+		"context":             e.Context,
+		"user":                e.User,
+		"tags":                e.Tags,
+		"status":              e.Status,
+		"trace_id":            e.TraceID,
+		"fingerprint":         e.Fingerprint,
 		"linked_traces_count": linkedTracesCount,
-		"created_at":         e.CreatedAt,
-		"event_count":        eventCount,
-		"user_count":         userCount,
+		"created_at":          e.CreatedAt,
+		"first_seen":          firstSeen,
+		"last_seen":           lastSeen,
+		"event_count":         eventCount,
+		"user_count":          userCount,
 	}, nil
 }
 
@@ -2103,19 +2162,19 @@ func GetAllRootSpans(db *sql.DB, projectID, query string, limit, offset int) ([]
 
 // Trace Analytics functions
 type TraceStats struct {
-	TotalTraces      int     `json:"total_traces"`
-	AvgDuration      float64 `json:"avg_duration_ms"`
-	P50Duration      float64 `json:"p50_duration_ms"`
-	P75Duration      float64 `json:"p75_duration_ms"`
-	P95Duration      float64 `json:"p95_duration_ms"`
-	P99Duration      float64 `json:"p99_duration_ms"`
-	MinDuration      float64 `json:"min_duration_ms"`
-	MaxDuration      float64 `json:"max_duration_ms"`
-	ErrorCount       int     `json:"error_count"`
-	OkCount          int     `json:"ok_count"`
-	UnknownCount     int     `json:"unknown_count"`
-	ErrorRate        float64 `json:"error_rate"`
-	TotalDuration    float64 `json:"total_duration_ms"`
+	TotalTraces   int     `json:"total_traces"`
+	AvgDuration   float64 `json:"avg_duration_ms"`
+	P50Duration   float64 `json:"p50_duration_ms"`
+	P75Duration   float64 `json:"p75_duration_ms"`
+	P95Duration   float64 `json:"p95_duration_ms"`
+	P99Duration   float64 `json:"p99_duration_ms"`
+	MinDuration   float64 `json:"min_duration_ms"`
+	MaxDuration   float64 `json:"max_duration_ms"`
+	ErrorCount    int     `json:"error_count"`
+	OkCount       int     `json:"ok_count"`
+	UnknownCount  int     `json:"unknown_count"`
+	ErrorRate     float64 `json:"error_rate"`
+	TotalDuration float64 `json:"total_duration_ms"`
 }
 
 type TraceTimeSeries struct {
