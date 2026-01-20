@@ -12,9 +12,10 @@ import (
 // GetErrorGroups returns grouped errors with aggregated stats
 func GetErrorGroups(db *sql.DB, projectID string, limit int, cursor string, status string) ([]map[string]interface{}, string, bool, error) {
 	// Build the base query for grouped errors
+	// Use COALESCE to handle NULL fingerprints by grouping with message as fallback
 	baseQuery := `
 		SELECT
-			fingerprint,
+			COALESCE(fingerprint, message || ':' || level) as fingerprint,
 			message,
 			level,
 			status,
@@ -35,7 +36,7 @@ func GetErrorGroups(db *sql.DB, projectID string, limit int, cursor string, stat
 		args = append(args, status)
 	}
 
-	baseQuery += " GROUP BY fingerprint, message, level, status, project_id, environment, platform"
+	baseQuery += " GROUP BY COALESCE(fingerprint, message || ':' || level), message, level, status, project_id, environment, platform"
 
 	// Cursor-based pagination on last_seen using HAVING clause
 	if cursor != "" {
@@ -136,11 +137,11 @@ func getUserCountsByFingerprint(db *sql.DB, projectID string, fingerprints []str
 	placeholders = placeholders[:len(placeholders)-1]
 
 	query := `
-		SELECT fingerprint, COUNT(DISTINCT user)
+		SELECT COALESCE(fingerprint, message || ':' || level) as fingerprint, COUNT(DISTINCT user)
 		FROM errors
-		WHERE project_id = ? AND fingerprint IN (` + placeholders + `)
+		WHERE project_id = ? AND COALESCE(fingerprint, message || ':' || level) IN (` + placeholders + `)
 		AND user IS NOT NULL AND user != '' AND user != '{}'
-		GROUP BY fingerprint`
+		GROUP BY COALESCE(fingerprint, message || ':' || level)`
 
 	args := []interface{}{projectID}
 	for _, fp := range fingerprints {
@@ -176,14 +177,14 @@ func getTimelinesByFingerprint(db *sql.DB, projectID string, fingerprints []stri
 	// Get hourly counts for the last 24 hours
 	query := `
 		SELECT
-			fingerprint,
+			COALESCE(fingerprint, message || ':' || level) as fingerprint,
 			strftime('%Y-%m-%d %H:00:00', created_at) as hour,
 			COUNT(*) as count
 		FROM errors
 		WHERE project_id = ?
-		AND fingerprint IN (` + placeholders + `)
+		AND COALESCE(fingerprint, message || ':' || level) IN (` + placeholders + `)
 		AND created_at >= datetime('now', '-' || ? || ' hours')
-		GROUP BY fingerprint, hour
+		GROUP BY COALESCE(fingerprint, message || ':' || level), hour
 		ORDER BY fingerprint, hour DESC`
 
 	args := []interface{}{projectID}
@@ -221,7 +222,7 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 	var g ErrorGroup
 	err := db.QueryRow(`
 		SELECT
-			fingerprint,
+			COALESCE(fingerprint, message || ':' || level) as fingerprint,
 			message,
 			level,
 			status,
@@ -233,8 +234,8 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 			platform,
 			MAX(id) as representative_id
 		FROM errors
-		WHERE project_id = ? AND fingerprint = ?
-		GROUP BY fingerprint, message, level, status, project_id, environment, platform`,
+		WHERE project_id = ? AND COALESCE(fingerprint, message || ':' || level) = ?
+		GROUP BY COALESCE(fingerprint, message || ':' || level), message, level, status, project_id, environment, platform`,
 		projectID, fingerprint,
 	).Scan(
 		&g.Fingerprint, &g.Message, &g.Level, &g.Status, &g.ProjectID,
@@ -250,7 +251,7 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 	db.QueryRow(`
 		SELECT COUNT(DISTINCT user)
 		FROM errors
-		WHERE project_id = ? AND fingerprint = ?
+		WHERE project_id = ? AND COALESCE(fingerprint, message || ':' || level) = ?
 		AND user IS NOT NULL AND user != '' AND user != '{}'`,
 		projectID, fingerprint,
 	).Scan(&userCount)
@@ -260,7 +261,7 @@ func GetErrorGroupByFingerprint(db *sql.DB, projectID, fingerprint string, limit
 		SELECT id, project_id, message, level, environment, release, platform,
 		       timestamp, stacktrace, context, user, tags, status, trace_id, fingerprint, created_at
 		FROM errors
-		WHERE project_id = ? AND fingerprint = ?
+		WHERE project_id = ? AND COALESCE(fingerprint, message || ':' || level) = ?
 		ORDER BY created_at DESC
 		LIMIT ?`,
 		projectID, fingerprint, limit,
