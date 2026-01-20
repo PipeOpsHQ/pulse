@@ -1577,34 +1577,34 @@ Sentry.init({
                       {error.message || "No message"}
                     </div>
                     <div
-                      class="mt-1 flex items-center gap-2 text-[10px] text-slate-500"
+                    class="mt-1 flex items-center gap-2 text-[10px] text-slate-500"
+                  >
+                    <span
+                      class="rounded px-1.5 py-0.5 text-[9px] font-bold tracking-tight bg-white/5 border border-white/10"
                     >
-                      <span
-                        class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-white/5 border border-white/10"
-                      >
-                        {error.level}
-                      </span>
-                      {#if error.status}
-                        {#if error.status === "resolved"}
-                          <span
-                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-green-500/10 border border-green-500/20 text-green-400"
-                          >
-                            ● Resolved
-                          </span>
-                        {:else if error.status === "ignored"}
-                          <span
-                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-slate-500/10 border border-slate-500/20 text-slate-400"
-                          >
-                            ● Ignored
-                          </span>
-                        {:else}
-                          <span
-                            class="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tight bg-red-500/10 border border-red-500/20 text-red-400"
-                          >
-                            ● Unresolved
-                          </span>
-                        {/if}
+                      {error.level}
+                    </span>
+                    {#if error.status}
+                      {#if error.status === "resolved"}
+                        <span
+                          class="rounded px-1.5 py-0.5 text-[9px] font-bold tracking-tight bg-green-500/10 border border-green-500/20 text-green-400"
+                        >
+                          ● resolved
+                        </span>
+                      {:else if error.status === "ignored"}
+                        <span
+                          class="rounded px-1.5 py-0.5 text-[9px] font-bold tracking-tight bg-slate-500/10 border border-slate-500/20 text-slate-400"
+                        >
+                          ● ignored
+                        </span>
+                      {:else}
+                        <span
+                          class="rounded px-1.5 py-0.5 text-[9px] font-bold tracking-tight bg-red-500/10 border border-red-500/20 text-red-400"
+                        >
+                          ● unresolved
+                        </span>
                       {/if}
+                    {/if}
                       {#if error.environment}
                         <span class="rounded bg-white/5 px-1.5 py-0.5"
                           >{error.environment}</span
@@ -2622,7 +2622,7 @@ Sentry.init({
                     </div>
                     {#if span.status && span.status.toLowerCase() !== "ok" && span.status.toLowerCase() !== "unset"}
                       <span
-                        class="text-[9px] uppercase font-bold {getStatusColor(
+                        class="text-[9px] font-bold {getStatusColor(
                           span.status,
                         )}">{span.status}</span
                       >
