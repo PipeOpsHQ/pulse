@@ -97,6 +97,34 @@ graph TD
 
 ---
 
+## Database Migrations
+
+Pulse includes an automatic database migration system that runs on container startup. Migrations are tracked and applied idempotently.
+
+### How It Works
+
+- Migrations stored in `migrations/` directory are automatically applied
+- Each migration runs only once (tracked in `schema_migrations` table)
+- Migrations execute in alphabetical order on container start
+- Failed migrations prevent the application from starting
+
+### Creating New Migrations
+
+```bash
+# 1. Create migration file
+echo "ALTER TABLE projects ADD COLUMN new_field TEXT;" > migrations/2024-01-21_add_new_field.sql
+
+# 2. Rebuild and deploy
+docker build -t pulse:latest .
+docker-compose up -d
+
+# Migrations run automatically on startup!
+```
+
+For detailed migration documentation, see [README_MIGRATIONS.md](README_MIGRATIONS.md).
+
+---
+
 ## Security
 
 We take security seriously. Please refer to our [SECURITY.md](./SECURITY.md) for vulnerability reporting.

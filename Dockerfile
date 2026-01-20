@@ -25,17 +25,27 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libc6 \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /root/
 # Copy binary from builder
 COPY --from=backend-builder /app/pulse .
 # Copy static files from builder (for server to serve)
 COPY --from=backend-builder /app/frontend/dist ./frontend/dist
+# Copy migration files and scripts
+COPY migrations /root/migrations
+COPY scripts/run-migrations.sh /root/scripts/run-migrations.sh
+COPY scripts/docker-entrypoint.sh /root/scripts/docker-entrypoint.sh
+# Make scripts executable
+RUN chmod +x /root/scripts/*.sh
 # Create data directory for SQLite
 RUN mkdir -p /root/data
 
 EXPOSE 8080
 ENV PORT=8080
 ENV GIN_MODE=release
+ENV DB_PATH=/root/data/sentry.db
+ENV MIGRATIONS_DIR=/root/migrations
 
+ENTRYPOINT ["/root/scripts/docker-entrypoint.sh"]
 CMD ["./pulse"]

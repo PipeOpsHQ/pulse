@@ -1,0 +1,36 @@
+# Development files
+.git
+.gitignore
+.env
+.env.local
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Build artifacts
+*.db
+*.db-shm
+*.db-wal
+sentry-alt
+pulse
+
+# Frontend development
+frontend/node_modules
+frontend/.svelte-kit
+frontend/dist
+
+# Test files
+test-*.sh
+*.test.go
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
