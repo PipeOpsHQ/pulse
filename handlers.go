@@ -462,8 +462,21 @@ func getProjectErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if grouped {
 		errors, nextCursor, hasMore, err := GetErrorGroups(db, projectID, limit, cursor, status)
 		if err != nil {
-			http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
-			return
+			// Check if error is due to missing fingerprint column
+			if strings.Contains(err.Error(), "no such column: fingerprint") {
+				// Fall back to message-based grouping without fingerprint column
+				fmt.Printf("Warning: fingerprint column not found, using fallback grouping\n")
+				errors, nextCursor, hasMore, err = GetErrorGroupsFallback(db, projectID, limit, cursor, status)
+				if err != nil {
+					fmt.Printf("Error in fallback grouping: %v\n", err)
+					http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
+					return
+				}
+			} else {
+				fmt.Printf("Error fetching error groups: %v\n", err)
+				http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
+				return
+			}
 		}
 
 		response := map[string]interface{}{
