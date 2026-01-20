@@ -1,28 +1,31 @@
-# Go
+# Build outputs
+pulse
+sentry-alt
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
+
+# Test binary, built with `go test -c`
 *.test
+
+# Output of the go coverage tool
 *.out
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Dependency directories
+vendor/
+
+# Go workspace file
 go.work
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/build/
-frontend/.svelte-kit/
-# frontend/public/
-
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 *~
@@ -31,9 +34,15 @@ frontend/.svelte-kit/
 .DS_Store
 Thumbs.db
 
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.svelte-kit/
+
 # Logs
 *.log
-
-sentry-alt
-server.pid
-.env
