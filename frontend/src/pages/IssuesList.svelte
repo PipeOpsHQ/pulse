@@ -337,7 +337,7 @@
                 class="mt-1 flex items-center gap-2 text-[9px] text-slate-500"
               >
                 <span
-                  class="rounded px-1.5 py-0.5 text-xs font-bold uppercase tracking-tight {getStatusColorClass(
+                  class="rounded px-1.5 py-0.5 text-xs font-bold tracking-tight {getStatusColorClass(
                     issue.status,
                   )}"
                 >

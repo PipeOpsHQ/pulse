@@ -181,7 +181,7 @@
                           {/if}
                           {#if error.status}
                             <span
-                              class="rounded px-2 py-0.5 text-[10px] font-bold uppercase {error.status === 'resolved' ? 'bg-green-500/20 text-green-400' : error.status === 'ignored' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}"
+                              class="rounded px-2 py-0.5 text-[10px] font-bold {error.status === 'resolved' ? 'bg-green-500/20 text-green-400' : error.status === 'ignored' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}"
                             >
                               {error.status}
                             </span>
@@ -223,7 +223,7 @@
                 >
                 {#if rootSpan.status}
                   <span
-                    class="rounded px-2 py-0.5 bg-white/10 text-xs font-bold uppercase {getStatusColor(
+                    class="rounded px-2 py-0.5 bg-white/10 text-xs font-bold {getStatusColor(
                       rootSpan.status,
                     )}"
                   >
@@ -299,7 +299,7 @@
                       >
                       {#if child.status}
                         <span
-                          class="rounded px-1.5 py-0.5 bg-white/10 text-[10px] font-bold uppercase {getStatusColor(
+                          class="rounded px-1.5 py-0.5 bg-white/10 text-[10px] font-bold {getStatusColor(
                             child.status,
                           )}"
                         >

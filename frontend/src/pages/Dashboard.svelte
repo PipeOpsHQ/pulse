@@ -592,7 +592,7 @@
                     {#if error.status}
                       {@const statusColors = getIssueStatusColor(error.status)}
                       <span
-                        class="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-tight {getStatusColorClass(
+                        class="rounded-full px-2 py-0.5 text-[9px] font-bold tracking-tight {getStatusColorClass(
                           error.status,
                         )}"
                       >
@@ -602,7 +602,7 @@
                     {:else}
                       {@const statusColors = getIssueStatusColor("unresolved")}
                       <span
-                        class="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-tight {getStatusColorClass(
+                        class="rounded-full px-2 py-0.5 text-[9px] font-bold tracking-tight {getStatusColorClass(
                           'unresolved',
                         )}"
                       >

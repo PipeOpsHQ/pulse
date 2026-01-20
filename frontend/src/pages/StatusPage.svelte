@@ -103,9 +103,9 @@
                 <div class="flex items-center gap-3 mb-2">
                   <Activity size={20} class="text-pulse-400" />
                   <h2 class="text-xl font-bold text-white">{monitor.name}</h2>
-                  <span class="rounded px-2 py-0.5 text-xs font-bold uppercase {getStatusColor(monitor.status)} {getStatusBg(monitor.status)}">
-                    {monitor.status}
-                  </span>
+                <span class="rounded px-2 py-0.5 text-xs font-bold {getStatusColor(monitor.status)} {getStatusBg(monitor.status)}">
+                  {monitor.status}
+                </span>
                 </div>
                 <p class="text-sm text-slate-400 font-mono">{monitor.url}</p>
               </div>

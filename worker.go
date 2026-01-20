@@ -12,6 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Notification throttling cache
+type NotificationCache struct {
+	mu                sync.RWMutex
+	lastNotifications map[string]time.Time // key: "projectID:errorMessage"
+}
+
+var notificationCache = &NotificationCache{
+	lastNotifications: make(map[string]time.Time),
+}
+
 // Batch inserter for errors
 type ErrorBatch struct {
 	Event   *ErrorEvent
@@ -108,9 +118,9 @@ func flushErrorBatch(db *sql.DB) {
 		}
 		projectCounts[eb.Event.ProjectID]++
 
-		// Trigger notifications asynchronously
+		// Trigger notifications asynchronously with throttling
 		if eb.Project != nil {
-			go triggerNotifications(db, eb.Project, eb.Event)
+			go triggerNotificationsThrottled(db, eb.Project, eb.Event)
 		}
 	}
 

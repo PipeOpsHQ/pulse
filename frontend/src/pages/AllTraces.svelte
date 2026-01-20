@@ -263,7 +263,7 @@
                   <td class="px-6 py-4">
                     {#if trace.status && trace.status.toLowerCase() !== "ok" && trace.status.toLowerCase() !== "unset"}
                       <span
-                        class="inline-flex items-center rounded-md px-2 py-1 text-xs font-bold uppercase border {getStatusColor(
+                        class="inline-flex items-center rounded-md px-2 py-1 text-xs font-bold border {getStatusColor(
                           trace.status,
                         )}"
                       >

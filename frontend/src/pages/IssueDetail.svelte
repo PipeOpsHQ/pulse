@@ -270,7 +270,7 @@
           <div class="min-w-0 flex-1">
             <div class="mb-1.5 flex items-center gap-2">
               <span
-                class="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider {getLevelColorClass(
+                class="rounded px-1.5 py-0.5 text-[9px] font-semibold tracking-wider {getLevelColorClass(
                   error.level,
                 )}"
               >
@@ -1058,7 +1058,7 @@
               {#if error.status}
                 {@const statusColors = getIssueStatusColor(error.status)}
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs font-bold uppercase {getStatusColorClass(
+                  class="rounded-full px-2 py-0.5 text-xs font-bold {getStatusColorClass(
                     error.status,
                   )}"
                 >
@@ -1067,7 +1067,7 @@
                 </span>
               {:else}
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs font-bold uppercase {getStatusColorClass(
+                  class="rounded-full px-2 py-0.5 text-xs font-bold {getStatusColorClass(
                     'unresolved',
                   )}"
                 >

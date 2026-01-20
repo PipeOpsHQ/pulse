@@ -284,7 +284,7 @@ func storeError(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			http.Error(w, "Failed to store error", http.StatusInternalServerError)
 			return
 		}
-		triggerNotifications(db, project, event)
+		triggerNotificationsThrottled(db, project, event)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -788,7 +788,7 @@ func storeErrorSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			http.Error(w, "Failed to store error", http.StatusInternalServerError)
 			return
 		}
-		triggerNotifications(db, project, event)
+		triggerNotificationsThrottled(db, project, event)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1060,7 +1060,7 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 						log.Printf("[DSN Debug] Failed to insert error from transaction: %v", err)
 					} else {
 						log.Printf("[DSN Debug] Successfully stored error from transaction %s", tx.EventID)
-						triggerNotifications(db, project, errorEvent)
+						triggerNotificationsThrottled(db, project, errorEvent)
 					}
 				}
 			}
@@ -1126,7 +1126,7 @@ func handleEnvelopeSentry(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 					log.Printf("[DSN Debug] Failed to insert error event: %v", err)
 				} else {
 					log.Printf("[DSN Debug] Successfully stored error event %s", evt.EventID)
-					triggerNotifications(db, project, errorEvent)
+					triggerNotificationsThrottled(db, project, errorEvent)
 				}
 			}
 		}
@@ -1542,17 +1542,108 @@ func getCoverageBadge(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 </svg>`, color, coverageText, coverageText)
 }
 
-func triggerNotifications(db *sql.DB, project *Project, event *ErrorEvent) {
+// triggerNotificationsThrottled checks if notification should be sent based on rate limiting
+func triggerNotificationsThrottled(db *sql.DB, project *Project, event *ErrorEvent) {
+	// Get project-specific notification settings
+	projectSettings, err := GetProjectSettings(db, project.ID)
+	if err != nil {
+		log.Printf("Failed to get project settings for notifications: %v", err)
+		// Continue with default settings
+		projectSettings = &ProjectSettings{
+			NotificationEnabled:   true,
+			NotificationLevels:    "error,fatal",
+			NotificationRateLimit: 60, // Default 60 minutes
+		}
+	}
+
+	// Check if notifications are enabled for this project
+	if !projectSettings.NotificationEnabled {
+		return
+	}
+
+	// Check if the error level should trigger notifications
+	if projectSettings.NotificationLevels != "" {
+		levels := strings.Split(projectSettings.NotificationLevels, ",")
+		shouldNotify := false
+		for _, level := range levels {
+			if strings.TrimSpace(level) == event.Level {
+				shouldNotify = true
+				break
+			}
+		}
+		if !shouldNotify {
+			log.Printf("[Notification] Skipping notification for level %s (not in configured levels: %s)", event.Level, projectSettings.NotificationLevels)
+			return
+		}
+	}
+
+	// Check rate limiting using project settings
+	cacheKey := fmt.Sprintf("%s:%s", project.ID, event.Message)
+	now := time.Now()
+
+	notificationCache.mu.Lock()
+	lastNotification, exists := notificationCache.lastNotifications[cacheKey]
+	rateLimit := time.Duration(projectSettings.NotificationRateLimit) * time.Minute
+
+	if exists && now.Sub(lastNotification) < rateLimit {
+		notificationCache.mu.Unlock()
+		log.Printf("[Notification] Suppressed duplicate notification for error '%s' in project '%s' (last sent %v ago, rate limit: %v)",
+			event.Message, project.Name, now.Sub(lastNotification).Round(time.Minute), rateLimit)
+		return
+	}
+
+	// Update cache with current time
+	notificationCache.lastNotifications[cacheKey] = now
+	notificationCache.mu.Unlock()
+
+	// Clean up old cache entries periodically (every 100 notifications)
+	if len(notificationCache.lastNotifications)%100 == 0 {
+		go cleanNotificationCache(rateLimit * 2)
+	}
+
+	// Get event count for this error
+	var eventCount int
+	db.QueryRow("SELECT COUNT(*) FROM errors WHERE message = ? AND project_id = ?", event.Message, project.ID).Scan(&eventCount)
+
+	log.Printf("[Notification] Sending notification for error '%s' in project '%s' (occurrence #%d)",
+		event.Message, project.Name, eventCount)
+
+	// Trigger actual notifications
+	triggerNotifications(db, project, event, eventCount, projectSettings)
+}
+
+// cleanNotificationCache removes old entries from the notification cache
+func cleanNotificationCache(olderThan time.Duration) {
+	notificationCache.mu.Lock()
+	defer notificationCache.mu.Unlock()
+
+	now := time.Now()
+	for key, lastTime := range notificationCache.lastNotifications {
+		if now.Sub(lastTime) > olderThan {
+			delete(notificationCache.lastNotifications, key)
+		}
+	}
+	log.Printf("[Notification] Cleaned notification cache, current size: %d", len(notificationCache.lastNotifications))
+}
+
+func triggerNotifications(db *sql.DB, project *Project, event *ErrorEvent, eventCount int, projectSettings *ProjectSettings) {
 	settings, err := GetAllSettings(db)
 	if err != nil {
 		return
+	}
+
+	// Build notification message with context
+	occurrenceText := ""
+	if eventCount > 1 {
+		occurrenceText = fmt.Sprintf(" (occurred %d times)", eventCount)
 	}
 
 	// Slack Notification
 	if webhook, ok := settings["slack_webhook"]; ok && webhook != "" {
 		go func() {
 			payload := map[string]interface{}{
-				"text": "*Pulse Alert:* New error in project *" + project.Name + "*\n> " + event.Message,
+				"text": fmt.Sprintf("*Pulse Alert:* New %s error in project *%s*%s\n> %s",
+					event.Level, project.Name, occurrenceText, event.Message),
 			}
 			body, _ := json.Marshal(payload)
 			resp, err := http.Post(webhook, "application/json", bytes.NewBuffer(body))
@@ -1564,10 +1655,35 @@ func triggerNotifications(db *sql.DB, project *Project, event *ErrorEvent) {
 		}()
 	}
 
+	// Project-specific webhook
+	if projectSettings.NotificationWebhookURL != "" {
+		go func() {
+			payload := map[string]interface{}{
+				"event":       event,
+				"project":     project,
+				"event_count": eventCount,
+				"timestamp":   time.Now(),
+			}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(projectSettings.NotificationWebhookURL, "application/json", bytes.NewBuffer(body))
+			if err != nil {
+				log.Printf("Failed to send project webhook notification: %v", err)
+			} else {
+				resp.Body.Close()
+			}
+		}()
+	}
+
 	// Generic Webhook
 	if webhook, ok := settings["generic_webhook"]; ok && webhook != "" {
 		go func() {
-			body, _ := json.Marshal(event)
+			payload := map[string]interface{}{
+				"event":       event,
+				"project":     project,
+				"event_count": eventCount,
+				"timestamp":   time.Now(),
+			}
+			body, _ := json.Marshal(payload)
 			resp, err := http.Post(webhook, "application/json", bytes.NewBuffer(body))
 			if err != nil {
 				log.Printf("Failed to send generic webhook: %v", err)
