@@ -90,17 +90,22 @@
         return;
       }
 
-      // Load grouped occurrences if fingerprint is available
+      // Load grouped occurrences if fingerprint is available; fall back to plain for backward compatibility
+      let gotOccurrences = false;
       if (error.fingerprint && error.project_id) {
         try {
           const groupResponse = await api.get(`/errors/${errorId}/occurrences?fingerprint=${error.fingerprint}&projectId=${error.project_id}`);
-          if (groupResponse.group && groupResponse.occurrences) {
-            // Merge group info into error
-            error.event_count = groupResponse.group.event_count;
-            error.user_count = groupResponse.group.user_count;
-            error.first_seen = groupResponse.group.first_seen;
-            error.last_seen = groupResponse.group.last_seen;
-            occurrences = groupResponse.occurrences || [];
+          if (groupResponse && (groupResponse.group || groupResponse.occurrences)) {
+            if (groupResponse.group) {
+              error.event_count = groupResponse.group.event_count;
+              error.user_count = groupResponse.group.user_count;
+              error.first_seen = groupResponse.group.first_seen;
+              error.last_seen = groupResponse.group.last_seen;
+            }
+            if (Array.isArray(groupResponse.occurrences)) {
+              occurrences = groupResponse.occurrences;
+              gotOccurrences = true;
+            }
           }
         } catch (e) {
           console.error("Failed to load error group:", e);
@@ -138,14 +143,15 @@
         tags = {};
       }
 
-      try {
-        occurrences = await api.get(`/errors/${errorId}/occurrences`);
-        if (!Array.isArray(occurrences)) {
-          occurrences = [];
+      // Only fetch plain occurrences when we didn't get group data (backward compatible)
+      if (!gotOccurrences) {
+        try {
+          const occ = await api.get(`/errors/${errorId}/occurrences`);
+          occurrences = Array.isArray(occ) ? occ : occ?.occurrences ?? (error ? [error] : []);
+        } catch (e) {
+          console.error("Failed to load occurrences:", e);
+          occurrences = error ? [error] : [];
         }
-      } catch (e) {
-        console.error("Failed to load occurrences:", e);
-        occurrences = error ? [error] : []; // fallback to the main error if fetch fails
       }
 
         // Load linked traces if error has trace_id

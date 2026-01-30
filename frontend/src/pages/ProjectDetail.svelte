@@ -107,18 +107,25 @@
       loading = true;
     }
     try {
-      const [projectData, errorsData, historyData, monitorsData] =
-        await Promise.all([
-          api.get(`/projects/${projectId}`),
-          api.get(`/projects/${projectId}/errors?grouped=true`),
-          api.get(`/projects/${projectId}/coverage/history`),
-          api.get(`/projects/${projectId}/monitors`).catch(() => []),
-        ]);
+      // Load project, coverage, monitors in parallel; errors with fallback for backward compatibility
+      const [projectData, historyData, monitorsData] = await Promise.all([
+        api.get(`/projects/${projectId}`),
+        api.get(`/projects/${projectId}/coverage/history`),
+        api.get(`/projects/${projectId}/monitors`).catch(() => []),
+      ]);
 
       project = projectData;
-      errors = errorsData?.data || [];
       coverageHistory = historyData || [];
       monitors = Array.isArray(monitorsData) ? monitorsData : [];
+
+      // Try grouped errors first; fall back to ungrouped for existing deployments
+      try {
+        const errorsData = await api.get(`/projects/${projectId}/errors?grouped=true`);
+        errors = errorsData?.data || [];
+      } catch (_) {
+        const errorsData = await api.get(`/projects/${projectId}/errors`);
+        errors = errorsData?.data || [];
+      }
     } catch (err) {
       console.error("Failed to load project:", err);
       if (showLoading) {

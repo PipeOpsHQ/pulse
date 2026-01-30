@@ -122,7 +122,12 @@ async function handleResponse(response) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    const error = new Error(errorText || `HTTP ${response.status}`);
+    // Avoid throwing raw HTML (e.g. 502 Bad Gateway pages) as error message
+    const message =
+      typeof errorText === 'string' && errorText.trimStart().startsWith('<')
+        ? `Request failed (${response.status})`
+        : errorText || `HTTP ${response.status}`;
+    const error = new Error(message);
     error.statusCode = response.status;
     throw error;
   }

@@ -366,6 +366,9 @@ func getErrors(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// Use grouped view if requested
 	if grouped && projectID != "" {
 		errors, nextCursor, hasMore, err = GetErrorGroups(db, projectID, limit, cursor, status)
+		if err != nil && strings.Contains(err.Error(), "no such column: fingerprint") {
+			errors, nextCursor, hasMore, err = GetErrorGroupsFallback(db, projectID, limit, cursor, status)
+		}
 		if err != nil {
 			http.Error(w, "Failed to fetch error groups", http.StatusInternalServerError)
 			return
@@ -539,6 +542,21 @@ func getErrorOccurrences(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if fingerprint != "" && projectID != "" {
 		// Get error group by fingerprint
 		groupData, occurrences, err := GetErrorGroupByFingerprint(db, projectID, fingerprint, 100)
+		if err != nil && strings.Contains(err.Error(), "no such column: fingerprint") {
+			// Fallback: get single error and return message-based occurrences
+			errorEvent, getErr := GetError(db, id)
+			if getErr == nil {
+				occurrences, getErr = GetErrorOccurrences(db, errorEvent.Message, errorEvent.ProjectID, 50)
+				if getErr == nil {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"group":       map[string]interface{}{"event_count": len(occurrences), "user_count": 0},
+						"occurrences": occurrences,
+					})
+					return
+				}
+			}
+		}
 		if err != nil {
 			http.Error(w, "Error group not found", http.StatusNotFound)
 			return
@@ -564,6 +582,17 @@ func getErrorOccurrences(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	// If error has fingerprint, use it for better grouping
 	if errorEvent.Fingerprint != "" {
 		groupData, occurrences, err := GetErrorGroupByFingerprint(db, errorEvent.ProjectID, errorEvent.Fingerprint, 100)
+		if err != nil && strings.Contains(err.Error(), "no such column: fingerprint") {
+			occurrences, err = GetErrorOccurrences(db, errorEvent.Message, errorEvent.ProjectID, 50)
+			if err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"group":       map[string]interface{}{"event_count": len(occurrences), "user_count": 0, "first_seen": nil, "last_seen": nil},
+					"occurrences": occurrences,
+				})
+				return
+			}
+		}
 		if err != nil {
 			http.Error(w, "Failed to fetch error group", http.StatusInternalServerError)
 			return

@@ -81,14 +81,17 @@
     }
     try {
       const status = activeTab === "unresolved" ? "unresolved" : activeTab;
-      let url = `/errors?status=${status}&limit=50&use_cursor=true&grouped=true`;
-      if (cursor) {
-        url += `&cursor=${encodeURIComponent(cursor)}`;
+      const baseParams = `status=${status}&limit=50&use_cursor=true`;
+      const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+      const projectParam = selectedProjectId ? `&projectId=${selectedProjectId}` : "";
+
+      // Try grouped first; fall back to ungrouped for backward compatibility
+      let response;
+      try {
+        response = await api.get(`/errors?${baseParams}&grouped=true${cursorParam}${projectParam}`, { ttl: 5000 });
+      } catch (_) {
+        response = await api.get(`/errors?${baseParams}${cursorParam}${projectParam}`, { ttl: 5000 });
       }
-      if (selectedProjectId) {
-        url += `&projectId=${selectedProjectId}`;
-      }
-      const response = await api.get(url, { ttl: 5000 }); // Cache for 5 seconds
 
       const rawIssues = response?.data || response || [];
       meta = response?.meta || { limit: 50, cursor: "", has_more: false };
@@ -102,15 +105,12 @@
             return {
               ...issue,
               projectName: project ? project.name : "Unknown Project",
-              // Use actual stats from API
               eventCount: issue.event_count || 1,
               userCount: issue.user_count || 0,
             };
           })
         : [];
 
-      // If cursor is empty, replace issues (new load or refresh)
-      // If cursor exists, append (load more)
       if (!cursor) {
         issues = newIssues;
       } else {
@@ -292,18 +292,18 @@
     </div>
   </div>
 
-  <!-- Issues List -->
+  <!-- Issues List: fixed height so it doesn't affect sidebar layout -->
   <div
-    class="overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl"
+    class="overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-xl flex flex-col max-h-[calc(100vh-14rem)]"
   >
     {#if loading}
-      <div class="divide-y divide-white/5 text-slate-500">
+      <div class="divide-y divide-white/5 text-slate-500 min-h-[200px]">
         {#each Array(8) as _}
           <div class="h-20 animate-pulse bg-white/5"></div>
         {/each}
       </div>
     {:else if filteredIssues.length === 0}
-      <div class="flex flex-col items-center justify-center py-20">
+      <div class="flex flex-col items-center justify-center py-20 min-h-[200px]">
         <div
           class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-pulse-500/10 text-pulse-400"
         >
@@ -315,7 +315,7 @@
         </p>
       </div>
     {:else}
-      <div class="divide-y divide-white/[0.06]">
+      <div class="divide-y divide-white/[0.06] overflow-y-auto flex-1 min-h-0">
         {#each filteredIssues as issue}
           {@const levelColors = getErrorLevelColor(issue.level)}
           {@const statusColors = getIssueStatusColor(issue.status)}
