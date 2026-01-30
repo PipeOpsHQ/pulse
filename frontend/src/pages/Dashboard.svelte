@@ -32,24 +32,25 @@
   };
 
   let refreshInterval = null;
+  let loadDataPromise = null; // Deduplicate concurrent loads
 
   // Refresh data when page becomes visible (e.g., returning from another page)
   function visibilityHandler() {
     if (!document.hidden) {
-      loadData(false); // Background refresh
+      loadData(false);
     }
   }
 
   onMount(async () => {
-    await loadData(true); // Initial load
+    await loadData(true);
     document.addEventListener("visibilitychange", visibilityHandler);
 
-    // Set up real-time polling every 30 seconds (optimized from 10s)
+    // Poll every 45s to reduce server load while keeping dashboard fresh
     refreshInterval = setInterval(() => {
       if (!document.hidden) {
-        loadData(false); // Background refresh, no loading state
+        loadData(false);
       }
-    }, 30000);
+    }, 45000);
   });
 
   onDestroy(() => {
@@ -60,120 +61,178 @@
   });
 
   let trends = [];
-  $: maxTrendEvents = Math.max(
-    50,
-    ...(trends || []).map((t) => (t.traces || 0) + (t.errors || 0)),
-  );
+  // Precompute once for chart (avoid recalculating inside each bar)
+  $: maxTrendEvents = (() => {
+    const t = trends || [];
+    if (t.length === 0) return 50;
+    let max = 50;
+    for (let i = 0; i < t.length; i++) {
+      const v = (t[i].traces || 0) + (t[i].errors || 0);
+      if (v > max) max = v;
+    }
+    return max;
+  })();
+  // Precomputed chart bars for smooth rendering (avoids recalc in each #each)
+  $: trendBars = (() => {
+    const t = trends || [];
+    const max = maxTrendEvents;
+    return t.map((s) => {
+      const successEvents = s.traces || 0;
+      const errorEvents = s.errors || 0;
+      return {
+        successHeight: max > 0 ? (successEvents / max) * 100 : 0,
+        errorHeight: max > 0 ? (errorEvents / max) * 100 : 0,
+        successEvents,
+        errorEvents,
+        hourPart: (s.hour || "").split(" ")[1]?.substring(0, 5) || "--:--",
+        hour: s.hour,
+      };
+    });
+  })();
 
   async function loadData(showLoading = false) {
+    // Deduplicate: if a load is already in progress, wait for it (unless showLoading)
+    if (loadDataPromise && !showLoading) {
+      return loadDataPromise;
+    }
+
     if (showLoading) {
       loading = true;
     }
-    try {
-      const [projectsResponse, errorsResponse, insightsResponse] =
-        await Promise.all([
-          api.get("/projects", { ttl: 30000 }), // Cache for 30 seconds
-          api.get("/errors?limit=20&use_cursor=true", { ttl: 10000 }), // Cache for 10 seconds
-          api.get("/insights?range=24h", { ttl: 30000 }), // Cache for 30 seconds
-        ]);
 
-      projects = Array.isArray(projectsResponse)
-        ? projectsResponse
-        : projectsResponse?.data || [];
+    const doLoad = async () => {
+      try {
+        // Phase 1: Load core data in parallel (fast first paint)
+        const [projectsResponse, errorsResponse, insightsResponse] =
+          await Promise.all([
+            api.get("/projects", { ttl: 30000 }),
+            api.get("/errors?limit=20&use_cursor=true", { ttl: 10000 }),
+            api.get("/insights?range=24h", { ttl: 30000 }),
+          ]);
 
-      // Handle both array response and object with data property
-      const errorsList = Array.isArray(errorsResponse)
-        ? errorsResponse
-        : errorsResponse?.data || errorsResponse || [];
+        const projectsList =
+          Array.isArray(projectsResponse) ?
+            projectsResponse
+            : projectsResponse?.data || [];
+        projects = projectsList;
 
-      recentErrors = Array.isArray(errorsList)
-        ? errorsList.map((err) => {
-            const project = (projects || []).find(
-              (p) => p.id === err.project_id,
-            );
-            return { ...err, projectName: project ? project.name : "Unknown" };
-          })
-        : [];
+        // O(1) project name lookup instead of find() per error
+        const projectNameById = new Map(
+          projectsList.map((p) => [p.id, p.name || "Unknown"]),
+        );
 
-      // Load monitors for all projects
-      monitors = [];
-      for (const project of projects) {
-        try {
-          const projectMonitors = await api
-            .get(`/projects/${project.id}/monitors`)
-            .catch(() => []);
-          if (Array.isArray(projectMonitors)) {
-            monitors.push(
-              ...projectMonitors.map((m) => ({
-                ...m,
-                projectName: project.name,
-              })),
+        const errorsList = Array.isArray(errorsResponse)
+          ? errorsResponse
+          : errorsResponse?.data || errorsResponse || [];
+
+        recentErrors = Array.isArray(errorsList)
+          ? errorsList.map((err) => ({
+              ...err,
+              projectName: projectNameById.get(err.project_id) ?? "Unknown",
+            }))
+          : [];
+
+        // Use insights for stats and trends
+        if (insightsResponse) {
+          stats = {
+            ...stats,
+            totalEvents:
+              (insightsResponse.errors?.total_errors || 0) +
+              (insightsResponse.traces?.total_traces || 0),
+            criticalErrors:
+              insightsResponse.errors?.by_level?.error ||
+              insightsResponse.errors?.by_level?.fatal ||
+              0,
+          };
+          trends = insightsResponse.trends || [];
+        } else {
+          stats = {
+            ...stats,
+            totalEvents: projectsList.reduce(
+              (sum, p) => sum + (p.current_month_events || 0),
+              0,
+            ),
+            criticalErrors: recentErrors.filter(
+              (e) => e.level === "error" || e.level === "fatal",
+            ).length,
+          };
+        }
+
+        stats.activeProjects = projectsList.length;
+        stats.totalMonitors = 0;
+        stats.upMonitors = 0;
+        stats.downMonitors = 0;
+
+        // Health score from events (monitors added in phase 2)
+        if (stats.totalEvents > 0) {
+          const errorRatio =
+            stats.criticalErrors / Math.max(1, stats.totalEvents);
+          stats.healthScore = Math.max(
+            0,
+            Math.min(100, 100 - Math.round(errorRatio * 500)),
+          );
+        } else {
+          stats.healthScore = 100;
+        }
+
+        // Phase 2: Load monitors in parallel (don't block first paint)
+        if (projectsList.length > 0) {
+          const monitorResponses = await Promise.all(
+            projectsList.map((project) =>
+              api.get(`/projects/${project.id}/monitors`).catch(() => []),
+            ),
+          );
+          const monitorsList = [];
+          monitorResponses.forEach((projectMonitors, i) => {
+            const project = projectsList[i];
+            if (Array.isArray(projectMonitors)) {
+              monitorsList.push(
+                ...projectMonitors.map((m) => ({
+                  ...m,
+                  projectName: project.name,
+                })),
+              );
+            }
+          });
+          monitors = monitorsList;
+
+          stats.totalMonitors = monitorsList.length;
+          stats.upMonitors = monitorsList.filter((m) => m.status === "up").length;
+          stats.downMonitors = monitorsList.filter(
+            (m) => m.status === "down",
+          ).length;
+
+          if (stats.totalMonitors > 0) {
+            const monitorHealth =
+              (stats.upMonitors / stats.totalMonitors) * 100;
+            stats.healthScore = Math.round(
+              stats.healthScore * 0.7 + monitorHealth * 0.3,
             );
           }
-        } catch (err) {
-          // Ignore errors for individual projects
+        } else {
+          monitors = [];
+          stats.totalMonitors = 0;
+          stats.upMonitors = 0;
+          stats.downMonitors = 0;
         }
+      } catch (error) {
+        console.error("Failed to load data:", error);
+        projects = projects || [];
+        recentErrors = recentErrors || [];
+        monitors = monitors || [];
+        if (showLoading) {
+          toast.add("Failed to load dashboard data", "error");
+        }
+      } finally {
+        if (showLoading) {
+          loading = false;
+        }
+        loadDataPromise = null;
       }
+    };
 
-      // Use real insights data if available
-      if (insightsResponse) {
-        stats.totalEvents =
-          (insightsResponse.errors?.total_errors || 0) +
-          (insightsResponse.traces?.total_traces || 0);
-        stats.criticalErrors =
-          insightsResponse.errors?.by_level?.error ||
-          insightsResponse.errors?.by_level?.fatal ||
-          0;
-        trends = insightsResponse.trends || [];
-      } else {
-        // Fallback to manual calculation
-        stats.totalEvents = (projects || []).reduce(
-          (sum, p) => sum + (p.current_month_events || 0),
-          0,
-        );
-        stats.criticalErrors = (recentErrors || []).filter(
-          (e) => e.level === "error" || e.level === "fatal",
-        ).length;
-      }
-
-      stats.activeProjects = (projects || []).length;
-      stats.totalMonitors = monitors.length;
-      stats.upMonitors = monitors.filter((m) => m.status === "up").length;
-      stats.downMonitors = monitors.filter((m) => m.status === "down").length;
-
-      // Artificial health score based on error ratio and monitor status
-      if (stats.totalEvents > 0) {
-        const errorRatio =
-          stats.criticalErrors / Math.max(1, stats.totalEvents);
-        stats.healthScore = Math.max(
-          0,
-          Math.min(100, 100 - Math.round(errorRatio * 500)),
-        ); // Scaled for visibility
-      } else {
-        stats.healthScore = 100;
-      }
-
-      // Adjust health score based on monitor status
-      if (stats.totalMonitors > 0) {
-        const monitorHealth = (stats.upMonitors / stats.totalMonitors) * 100;
-        stats.healthScore = Math.round(
-          stats.healthScore * 0.7 + monitorHealth * 0.3,
-        );
-      }
-    } catch (error) {
-      console.error("Failed to load data:", error);
-      // Ensure arrays are never null
-      projects = projects || [];
-      recentErrors = recentErrors || [];
-      monitors = monitors || [];
-      if (showLoading) {
-        toast.add("Failed to load dashboard data", "error");
-      }
-    } finally {
-      if (showLoading) {
-        loading = false;
-      }
-    }
+    loadDataPromise = doLoad();
+    return loadDataPromise;
   }
 
   function getHealthColor(score) {
@@ -393,46 +452,34 @@
             <div
               class="flex h-48 items-end gap-1.5 sm:gap-2 px-3 overflow-x-auto pb-8"
             >
-              {#if (trends || []).length > 0}
-                {#each trends as stat}
-                  {@const successEvents = stat.traces}
-                  {@const errorEvents = stat.errors}
-                  {@const maxEvents = Math.max(
-                    50,
-                    ...trends.map((t) => t.traces + t.errors),
-                  )}
-                  {@const successHeight = (successEvents / maxEvents) * 100}
-                  {@const errorHeight = (errorEvents / maxEvents) * 100}
-                  {@const hourPart =
-                    (stat.hour || "").split(" ")[1]?.substring(0, 5) || "--:--"}
-
+              {#if trendBars.length > 0}
+                {#each trendBars as bar}
                   <div
                     class="group relative flex-1 min-w-[20px] flex flex-col justify-end gap-1 hover:z-10"
                   >
                     <div
                       class="w-full bg-red-500/30 rounded-t-sm group-hover:bg-red-500/50 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-red-500/20"
-                      style="height: {errorHeight}%"
-                      title="{errorEvents} errors"
+                      style="height: {bar.errorHeight}%"
+                      title="{bar.errorEvents} errors"
                     ></div>
                     <div
                       class="w-full bg-emerald-500/50 rounded-t-sm group-hover:bg-emerald-500/70 transition-all duration-200 group-hover:shadow-lg group-hover:shadow-emerald-500/20"
-                      style="height: {successHeight}%"
-                      title="{successEvents} events"
+                      style="height: {bar.successHeight}%"
+                      title="{bar.successEvents} events"
                     ></div>
                     <div
                       class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-[9px] font-mono text-slate-500 whitespace-nowrap"
                     >
-                      {hourPart}
+                      {bar.hourPart}
                     </div>
-                    <!-- Tooltip on hover -->
                     <div
                       class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900/95 border border-white/10 rounded text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 shadow-2xl"
                     >
                       <div class="font-bold mb-1 border-b border-white/10 pb-1">
-                        {stat.hour}
+                        {bar.hour}
                       </div>
-                      <div class="text-emerald-400">{successEvents} traces</div>
-                      <div class="text-red-400">{errorEvents} errors</div>
+                      <div class="text-emerald-400">{bar.successEvents} traces</div>
+                      <div class="text-red-400">{bar.errorEvents} errors</div>
                     </div>
                   </div>
                 {/each}
