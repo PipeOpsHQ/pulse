@@ -29,7 +29,7 @@
 </script>
 
 <aside
-  class="fixed inset-y-0 left-0 z-[1000] flex transition-all duration-300 ease-in-out lg:static lg:inset-auto"
+  class="fixed inset-y-0 left-0 z-[1000] flex h-screen shrink-0 transition-all duration-300 ease-in-out"
   class:w-64={!$sidebarCollapsed}
   class:w-20={$sidebarCollapsed}
 >

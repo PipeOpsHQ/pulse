@@ -20,6 +20,7 @@
   import Landing from "./pages/Landing.svelte";
   import { onMount } from "svelte";
   import { isAuthenticated } from "./stores/auth";
+  import { sidebarCollapsed } from "./stores/ui";
 
   let currentPath = $state(
     typeof window !== "undefined" ? window.location.pathname : "/",
@@ -118,10 +119,14 @@
   <div class="flex min-h-screen bg-[#050505] text-white">
     <Sidebar {currentPath} />
 
-    <div class="flex flex-1 flex-col transition-all duration-300 min-w-0">
+    <div
+      class="flex flex-1 flex-col transition-all duration-300 min-w-0 min-h-screen"
+      class:lg:ml-64={!$sidebarCollapsed}
+      class:lg:ml-20={$sidebarCollapsed}
+    >
       <Header breadcrumbs={getBreadcrumbs(currentPath)} />
 
-      <main class="flex-1 overflow-y-auto p-4 md:p-8">
+      <main class="flex-1 overflow-y-auto p-4 md:p-8 min-h-0">
         <div class="mx-auto w-full max-w-7xl">
           {#if (currentPath === "/" && authenticated) || currentPath === "/dashboard"}
             <Dashboard />
