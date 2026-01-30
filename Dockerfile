@@ -48,4 +48,4 @@ ENV DB_PATH=/root/data/sentry.db
 ENV MIGRATIONS_DIR=/root/migrations
 
 ENTRYPOINT ["/root/scripts/docker-entrypoint.sh"]
-CMD ["./pulse"]
+aCMD ["./pulse"]

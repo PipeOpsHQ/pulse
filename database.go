@@ -1264,6 +1264,138 @@ func GetHourlyStats(db *sql.DB, projectID string) ([]HourlyStat, error) {
 	return stats, nil
 }
 
+// GetErrorInsightsAggregate returns total and counts by level/status using fast aggregates (no full row fetch).
+func GetErrorInsightsAggregate(db *sql.DB, projectID string) (total int, byLevel map[string]int, byStatus map[string]int, err error) {
+	byLevel = map[string]int{"error": 0, "warning": 0, "info": 0, "fatal": 0}
+	byStatus = map[string]int{"unresolved": 0, "resolved": 0, "ignored": 0}
+
+	baseFilter := "FROM errors"
+	args := []interface{}{}
+	if projectID != "" {
+		baseFilter = "FROM errors WHERE project_id = ?"
+		args = []interface{}{projectID}
+	}
+
+	if err := db.QueryRow("SELECT COUNT(*) "+baseFilter, args...).Scan(&total); err != nil {
+		return 0, byLevel, byStatus, err
+	}
+
+	levelQuery := "SELECT level, COUNT(*) as c " + baseFilter + " GROUP BY level"
+	rows, err := db.Query(levelQuery, args...)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var level string
+			var c int
+			if rows.Scan(&level, &c) == nil && level != "" {
+				if _, ok := byLevel[level]; ok {
+					byLevel[level] = c
+				} else {
+					byLevel[level] = c
+				}
+			}
+		}
+	}
+
+	statusQuery := "SELECT status, COUNT(*) as c " + baseFilter + " GROUP BY status"
+	rows2, err := db.Query(statusQuery, args...)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var status string
+			var c int
+			if rows2.Scan(&status, &c) == nil && status != "" {
+				if _, ok := byStatus[status]; ok {
+					byStatus[status] = c
+				} else {
+					byStatus[status] = c
+				}
+			}
+		}
+	}
+	return total, byLevel, byStatus, nil
+}
+
+// GetRecentErrorsForInsights returns up to limit recent errors with minimal fields (no stacktrace/context) for insights.
+func GetRecentErrorsForInsights(db *sql.DB, projectID string, limit int) ([]map[string]interface{}, error) {
+	q := `SELECT id, project_id, message, level, environment, platform, timestamp, status, created_at FROM errors`
+	var args []interface{}
+	if projectID != "" {
+		q += " WHERE project_id = ?"
+		args = append(args, projectID)
+	}
+	args = append(args, limit)
+	q += " ORDER BY created_at DESC LIMIT ?"
+
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id, projectIDVal, message, level, env, platform, status string
+		var timestamp, createdAt time.Time
+		if err := rows.Scan(&id, &projectIDVal, &message, &level, &env, &platform, &timestamp, &status, &createdAt); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"id": id, "project_id": projectIDVal, "message": message, "level": level,
+			"environment": env, "platform": platform, "timestamp": timestamp, "status": status, "created_at": createdAt,
+		})
+	}
+	return result, nil
+}
+
+// GetTraceInsightsAggregate returns total root span count and average duration ms using one query.
+func GetTraceInsightsAggregate(db *sql.DB, projectID string) (total int64, avgDurationMs float64, err error) {
+	q := `SELECT COUNT(*), AVG((julianday(timestamp) - julianday(start_timestamp)) * 86400000.0) FROM spans WHERE (parent_span_id IS NULL OR parent_span_id = '')`
+	args := []interface{}{}
+	if projectID != "" {
+		q += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+	var avg interface{}
+	if err := db.QueryRow(q, args...).Scan(&total, &avg); err != nil {
+		return 0, 0, err
+	}
+	if avg != nil {
+		if f, ok := avg.(float64); ok {
+			avgDurationMs = f
+		}
+	}
+	return total, avgDurationMs, nil
+}
+
+// GetRecentRootSpansForInsights returns up to limit recent root spans for insights.
+func GetRecentRootSpansForInsights(db *sql.DB, projectID string, limit int) ([]TraceSpan, error) {
+	q := `SELECT id, project_id, trace_id, span_id, parent_span_id, name, op, description, start_timestamp, timestamp, status, data FROM spans WHERE (parent_span_id IS NULL OR parent_span_id = '')`
+	var args []interface{}
+	if projectID != "" {
+		q += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+	args = append(args, limit)
+	q += " ORDER BY start_timestamp DESC LIMIT ?"
+
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var spans []TraceSpan
+	for rows.Next() {
+		var s TraceSpan
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.TraceID, &s.SpanID, &s.ParentSpanID, &s.Name, &s.Op, &s.Description, &s.StartTimestamp, &s.Timestamp, &s.Status, &s.Data); err != nil {
+			continue
+		}
+		spans = append(spans, s)
+	}
+	return spans, nil
+}
+
 // GetProjectRootSpansLightweight returns spans with cursor-based pagination
 func GetProjectRootSpansLightweight(db *sql.DB, projectID string, query string, limit int, cursor string) ([]TraceSpan, string, bool, error) {
 	sqlQuery := `

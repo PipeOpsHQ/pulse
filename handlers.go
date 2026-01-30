@@ -2255,139 +2255,37 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		"trends":       trends,
 	}
 
-	// Error Tracking Stats
+	// Error Tracking Stats (lightweight aggregates — no full row fetch)
 	errorStats := map[string]interface{}{}
-	if projectID != "" {
-		errors, total, _ := GetErrorsWithStats(db, projectID, 1000, 0, "")
-		errorStats["total_errors"] = total
-		errorStats["recent_errors"] = len(errors)
-
-		// Count by level
-		levelCounts := map[string]int{"error": 0, "warning": 0, "info": 0, "fatal": 0}
-		statusCounts := map[string]int{"unresolved": 0, "resolved": 0, "ignored": 0}
-
-		for _, err := range errors {
-			if level, ok := err["level"].(string); ok {
-				if count, exists := levelCounts[level]; exists {
-					levelCounts[level] = count + 1
-				}
-			}
-			if status, ok := err["status"].(string); ok {
-				if count, exists := statusCounts[status]; exists {
-					statusCounts[status] = count + 1
-				}
-			}
-		}
-		errorStats["by_level"] = levelCounts
-		errorStats["by_status"] = statusCounts
-
-		// Recent errors (last 10)
-		recentErrors := []map[string]interface{}{}
-		for i, err := range errors {
-			if i >= 10 {
-				break
-			}
-			recentErrors = append(recentErrors, err)
-		}
+	totalErrors, byLevel, byStatus, errErr := GetErrorInsightsAggregate(db, projectID)
+	if errErr == nil {
+		errorStats["total_errors"] = totalErrors
+		errorStats["by_level"] = byLevel
+		errorStats["by_status"] = byStatus
+		recentErrors, _ := GetRecentErrorsForInsights(db, projectID, 10)
+		errorStats["recent_errors"] = len(recentErrors)
 		errorStats["recent"] = recentErrors
 	} else {
-		errors, total, _ := GetAllErrorsWithStats(db, 1000, 0, "")
-		errorStats["total_errors"] = total
-		errorStats["recent_errors"] = len(errors)
-
-		levelCounts := map[string]int{"error": 0, "warning": 0, "info": 0, "fatal": 0}
-		statusCounts := map[string]int{"unresolved": 0, "resolved": 0, "ignored": 0}
-
-		for _, err := range errors {
-			if level, ok := err["level"].(string); ok {
-				if count, exists := levelCounts[level]; exists {
-					levelCounts[level] = count + 1
-				}
-			}
-			if status, ok := err["status"].(string); ok {
-				if count, exists := statusCounts[status]; exists {
-					statusCounts[status] = count + 1
-				}
-			}
-		}
-		errorStats["by_level"] = levelCounts
-		errorStats["by_status"] = statusCounts
-
-		recentErrors := []map[string]interface{}{}
-		for i, err := range errors {
-			if i >= 10 {
-				break
-			}
-			recentErrors = append(recentErrors, err)
-		}
-		errorStats["recent"] = recentErrors
+		errorStats["total_errors"] = 0
+		errorStats["by_level"] = map[string]int{"error": 0, "warning": 0, "info": 0, "fatal": 0}
+		errorStats["by_status"] = map[string]int{"unresolved": 0, "resolved": 0, "ignored": 0}
+		errorStats["recent_errors"] = 0
+		errorStats["recent"] = []map[string]interface{}{}
 	}
 	insights["errors"] = errorStats
 
-	// Traces/Performance Stats
+	// Traces/Performance Stats (lightweight aggregates)
 	traceStats := map[string]interface{}{}
-	if projectID != "" {
-		spans, _ := GetProjectRootSpans(db, projectID, "", 1000, 0)
-		traceStats["total_traces"] = len(spans)
-
-		// Calculate average duration
-		var totalDuration int64
-		var count int
-		for _, span := range spans {
-			if !span.StartTimestamp.IsZero() && !span.Timestamp.IsZero() {
-				duration := span.Timestamp.Sub(span.StartTimestamp).Milliseconds()
-				totalDuration += duration
-				count++
-			}
-		}
-		if count > 0 {
-			traceStats["avg_duration_ms"] = totalDuration / int64(count)
-		} else {
-			traceStats["avg_duration_ms"] = 0
-		}
-
-		// Recent traces
-		recentTraces := []TraceSpan{}
-		for i, span := range spans {
-			if i >= 10 {
-				break
-			}
-			recentTraces = append(recentTraces, span)
-		}
-		traceStats["recent"] = recentTraces
+	totalTraces, avgDurationMs, errTrace := GetTraceInsightsAggregate(db, projectID)
+	if errTrace == nil {
+		traceStats["total_traces"] = int(totalTraces)
+		traceStats["avg_duration_ms"] = int64(avgDurationMs)
+		recentSpans, _ := GetRecentRootSpansForInsights(db, projectID, 10)
+		traceStats["recent"] = recentSpans
 	} else {
-		// Get all traces across projects
-		var allSpans []TraceSpan
-		projects, _ := GetAllProjects(db)
-		for _, p := range projects {
-			spans, _ := GetProjectRootSpans(db, p.ID, "", 100, 0)
-			allSpans = append(allSpans, spans...)
-		}
-		traceStats["total_traces"] = len(allSpans)
-
-		var totalDuration int64
-		var count int
-		for _, span := range allSpans {
-			if !span.StartTimestamp.IsZero() && !span.Timestamp.IsZero() {
-				duration := span.Timestamp.Sub(span.StartTimestamp).Milliseconds()
-				totalDuration += duration
-				count++
-			}
-		}
-		if count > 0 {
-			traceStats["avg_duration_ms"] = totalDuration / int64(count)
-		} else {
-			traceStats["avg_duration_ms"] = 0
-		}
-
-		recentTraces := []TraceSpan{}
-		for i, span := range allSpans {
-			if i >= 10 {
-				break
-			}
-			recentTraces = append(recentTraces, span)
-		}
-		traceStats["recent"] = recentTraces
+		traceStats["total_traces"] = 0
+		traceStats["avg_duration_ms"] = 0
+		traceStats["recent"] = []TraceSpan{}
 	}
 	insights["traces"] = traceStats
 
@@ -2401,7 +2299,7 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		var activeMonitors int
 
 		for _, m := range monitors {
-			checks, _ := GetMonitorChecks(db, m.ID, 1000)
+			checks, _ := GetMonitorChecks(db, m.ID, 100)
 			if len(checks) == 0 {
 				continue
 			}
@@ -2468,7 +2366,7 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 			totalMonitors += len(monitors)
 
 			for _, m := range monitors {
-				checks, _ := GetMonitorChecks(db, m.ID, 1000)
+				checks, _ := GetMonitorChecks(db, m.ID, 100)
 				if len(checks) == 0 {
 					continue
 				}

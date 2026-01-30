@@ -102,12 +102,20 @@
 
     const doLoad = async () => {
       try {
-        // Phase 1: Load core data in parallel (fast first paint)
+        // Phase 1: Load core data; insights with timeout so heavy data doesn't block
+        const INSIGHTS_TIMEOUT_MS = 20000;
+        const insightsPromise = api
+          .get("/insights?range=24h", { ttl: 30000 })
+          .catch(() => null);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), INSIGHTS_TIMEOUT_MS),
+        );
+
         const [projectsResponse, errorsResponse, insightsResponse] =
           await Promise.all([
             api.get("/projects", { ttl: 30000 }),
             api.get("/errors?limit=20&use_cursor=true", { ttl: 10000 }),
-            api.get("/insights?range=24h", { ttl: 30000 }),
+            Promise.race([insightsPromise, timeoutPromise]).catch(() => null),
           ]);
 
         const projectsList =
