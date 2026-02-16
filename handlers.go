@@ -2289,134 +2289,33 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 	insights["traces"] = traceStats
 
-	// Uptime Stats
+	// Uptime Stats - using optimized aggregate queries
 	uptimeStats := map[string]interface{}{}
 	if projectID != "" {
 		monitors, _ := GetProjectMonitors(db, projectID)
-		uptimeStats["total_monitors"] = len(monitors)
-
-		var totalUptime24h, totalUptime7d, totalUptime30d float64
-		var activeMonitors int
-
-		for _, m := range monitors {
-			checks, _ := GetMonitorChecks(db, m.ID, 100)
-			if len(checks) == 0 {
-				continue
-			}
-			activeMonitors++
-
-			now := time.Now()
-			dayAgo := now.Add(-24 * time.Hour)
-			weekAgo := now.Add(-7 * 24 * time.Hour)
-			monthAgo := now.Add(-30 * 24 * time.Hour)
-
-			var up24h, total24h, up7d, total7d, up30d, total30d int
-			for _, check := range checks {
-				if check.CreatedAt.After(monthAgo) {
-					total30d++
-					if check.Status == "up" {
-						up30d++
-					}
-					if check.CreatedAt.After(weekAgo) {
-						total7d++
-						if check.Status == "up" {
-							up7d++
-						}
-						if check.CreatedAt.After(dayAgo) {
-							total24h++
-							if check.Status == "up" {
-								up24h++
-							}
-						}
-					}
-				}
-			}
-
-			if total24h > 0 {
-				totalUptime24h += float64(up24h) / float64(total24h) * 100
-			}
-			if total7d > 0 {
-				totalUptime7d += float64(up7d) / float64(total7d) * 100
-			}
-			if total30d > 0 {
-				totalUptime30d += float64(up30d) / float64(total30d) * 100
-			}
-		}
-
-		if activeMonitors > 0 {
-			uptimeStats["avg_uptime_24h"] = totalUptime24h / float64(activeMonitors)
-			uptimeStats["avg_uptime_7d"] = totalUptime7d / float64(activeMonitors)
-			uptimeStats["avg_uptime_30d"] = totalUptime30d / float64(activeMonitors)
+		avgUptime24h, avgUptime7d, avgUptime30d, totalMonitors, _, err := GetProjectUptimeStatsAggregate(db, projectID)
+		if err == nil {
+			uptimeStats["total_monitors"] = totalMonitors
+			uptimeStats["avg_uptime_24h"] = avgUptime24h
+			uptimeStats["avg_uptime_7d"] = avgUptime7d
+			uptimeStats["avg_uptime_30d"] = avgUptime30d
+			uptimeStats["monitors"] = monitors
 		} else {
+			uptimeStats["total_monitors"] = 0
 			uptimeStats["avg_uptime_24h"] = 0
 			uptimeStats["avg_uptime_7d"] = 0
 			uptimeStats["avg_uptime_30d"] = 0
 		}
-
-		uptimeStats["monitors"] = monitors
 	} else {
-		// All projects
-		projects, _ := GetAllProjects(db)
-		var totalMonitors int
-		var totalUptime24h, totalUptime7d, totalUptime30d float64
-		var activeMonitors int
-
-		for _, p := range projects {
-			monitors, _ := GetProjectMonitors(db, p.ID)
-			totalMonitors += len(monitors)
-
-			for _, m := range monitors {
-				checks, _ := GetMonitorChecks(db, m.ID, 100)
-				if len(checks) == 0 {
-					continue
-				}
-				activeMonitors++
-
-				now := time.Now()
-				dayAgo := now.Add(-24 * time.Hour)
-				weekAgo := now.Add(-7 * 24 * time.Hour)
-				monthAgo := now.Add(-30 * 24 * time.Hour)
-
-				var up24h, total24h, up7d, total7d, up30d, total30d int
-				for _, check := range checks {
-					if check.CreatedAt.After(monthAgo) {
-						total30d++
-						if check.Status == "up" {
-							up30d++
-						}
-						if check.CreatedAt.After(weekAgo) {
-							total7d++
-							if check.Status == "up" {
-								up7d++
-							}
-							if check.CreatedAt.After(dayAgo) {
-								total24h++
-								if check.Status == "up" {
-									up24h++
-								}
-							}
-						}
-					}
-				}
-
-				if total24h > 0 {
-					totalUptime24h += float64(up24h) / float64(total24h) * 100
-				}
-				if total7d > 0 {
-					totalUptime7d += float64(up7d) / float64(total7d) * 100
-				}
-				if total30d > 0 {
-					totalUptime30d += float64(up30d) / float64(total30d) * 100
-				}
-			}
-		}
-
-		uptimeStats["total_monitors"] = totalMonitors
-		if activeMonitors > 0 {
-			uptimeStats["avg_uptime_24h"] = totalUptime24h / float64(activeMonitors)
-			uptimeStats["avg_uptime_7d"] = totalUptime7d / float64(activeMonitors)
-			uptimeStats["avg_uptime_30d"] = totalUptime30d / float64(activeMonitors)
+		// All projects - using optimized aggregate query
+		avgUptime24h, avgUptime7d, avgUptime30d, totalMonitors, _, err := GetAllProjectsUptimeStatsAggregate(db)
+		if err == nil {
+			uptimeStats["total_monitors"] = totalMonitors
+			uptimeStats["avg_uptime_24h"] = avgUptime24h
+			uptimeStats["avg_uptime_7d"] = avgUptime7d
+			uptimeStats["avg_uptime_30d"] = avgUptime30d
 		} else {
+			uptimeStats["total_monitors"] = 0
 			uptimeStats["avg_uptime_24h"] = 0
 			uptimeStats["avg_uptime_7d"] = 0
 			uptimeStats["avg_uptime_30d"] = 0
