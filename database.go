@@ -111,7 +111,7 @@ func InitDB() (*sql.DB, error) {
 		_ = os.MkdirAll(dataDir, 0755)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite3", dbPath+"?_busy_timeout=5000&_journal_mode=WAL")
 	if err != nil {
 		return nil, err
 	}
@@ -361,10 +361,14 @@ func InitDB() (*sql.DB, error) {
 		}
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// Configure connection pool for better performance with SQLite
+	// SQLite with WAL mode supports concurrent reads but single writer
+	// Setting higher MaxOpenConns (50) allows more concurrent read queries
+	// This is beneficial for read-heavy workloads like dashboards and insights
+	db.SetMaxOpenConns(50)  // Allows 50 concurrent connections (mostly readers)
+	db.SetMaxIdleConns(10)  // Keep 10 idle connections ready to reduce latency
+	db.SetConnMaxLifetime(15 * time.Minute)  // Longer lifetime for stable connections
+	db.SetConnMaxIdleTime(5 * time.Minute)   // Close idle connections after 5 minutes
 
 	// Seed admin user
 	if err := seedAdminUser(db); err != nil {
@@ -1714,6 +1718,132 @@ func GetMonitorChecks(db *sql.DB, monitorID string, limit int) ([]MonitorCheck, 
 		checks = append(checks, c)
 	}
 	return checks, nil
+}
+
+// GetMonitorUptimeStats computes uptime percentages for a monitor efficiently using SQL aggregates
+type MonitorUptimeStats struct {
+	MonitorID   string
+	Uptime24h   float64
+	Uptime7d    float64
+	Uptime30d   float64
+	HasChecks   bool
+}
+
+func GetMonitorUptimeStats(db *sql.DB, monitorID string) (*MonitorUptimeStats, error) {
+	stats := &MonitorUptimeStats{MonitorID: monitorID}
+	
+	now := time.Now()
+	dayAgo := now.Add(-24 * time.Hour)
+	weekAgo := now.Add(-7 * 24 * time.Hour)
+	monthAgo := now.Add(-30 * 24 * time.Hour)
+	
+	// Single query to get all uptime stats
+	query := `
+		SELECT 
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as total_up,
+			SUM(CASE WHEN created_at > ? AND status = 'up' THEN 1 ELSE 0 END) as up_24h,
+			SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) as total_24h,
+			SUM(CASE WHEN created_at > ? AND status = 'up' THEN 1 ELSE 0 END) as up_7d,
+			SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) as total_7d,
+			SUM(CASE WHEN created_at > ? AND status = 'up' THEN 1 ELSE 0 END) as up_30d,
+			SUM(CASE WHEN created_at > ? THEN 1 ELSE 0 END) as total_30d
+		FROM monitor_checks 
+		WHERE monitor_id = ? AND created_at > ?
+	`
+	
+	var total, totalUp, up24h, total24h, up7d, total7d, up30d, total30d int
+	err := db.QueryRow(query, dayAgo, dayAgo, weekAgo, weekAgo, monthAgo, monthAgo, monitorID, monthAgo).Scan(
+		&total, &totalUp, &up24h, &total24h, &up7d, &total7d, &up30d, &total30d,
+	)
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	stats.HasChecks = total > 0
+	if total24h > 0 {
+		stats.Uptime24h = float64(up24h) / float64(total24h) * 100
+	}
+	if total7d > 0 {
+		stats.Uptime7d = float64(up7d) / float64(total7d) * 100
+	}
+	if total30d > 0 {
+		stats.Uptime30d = float64(up30d) / float64(total30d) * 100
+	}
+	
+	return stats, nil
+}
+
+// GetProjectUptimeStatsAggregate computes average uptime for all monitors in a project efficiently
+func GetProjectUptimeStatsAggregate(db *sql.DB, projectID string) (avgUptime24h, avgUptime7d, avgUptime30d float64, totalMonitors, activeMonitors int, err error) {
+	monitors, err := GetProjectMonitors(db, projectID)
+	if err != nil {
+		return 0, 0, 0, 0, 0, err
+	}
+	
+	totalMonitors = len(monitors)
+	if totalMonitors == 0 {
+		return 0, 0, 0, 0, 0, nil
+	}
+	
+	var totalUptime24h, totalUptime7d, totalUptime30d float64
+	
+	for _, m := range monitors {
+		stats, err := GetMonitorUptimeStats(db, m.ID)
+		if err != nil || !stats.HasChecks {
+			continue
+		}
+		activeMonitors++
+		totalUptime24h += stats.Uptime24h
+		totalUptime7d += stats.Uptime7d
+		totalUptime30d += stats.Uptime30d
+	}
+	
+	if activeMonitors > 0 {
+		avgUptime24h = totalUptime24h / float64(activeMonitors)
+		avgUptime7d = totalUptime7d / float64(activeMonitors)
+		avgUptime30d = totalUptime30d / float64(activeMonitors)
+	}
+	
+	return avgUptime24h, avgUptime7d, avgUptime30d, totalMonitors, activeMonitors, nil
+}
+
+// GetAllProjectsUptimeStatsAggregate computes average uptime across all projects efficiently
+func GetAllProjectsUptimeStatsAggregate(db *sql.DB) (avgUptime24h, avgUptime7d, avgUptime30d float64, totalMonitors, activeMonitors int, err error) {
+	projects, err := GetAllProjects(db)
+	if err != nil {
+		return 0, 0, 0, 0, 0, err
+	}
+	
+	var totalUptime24h, totalUptime7d, totalUptime30d float64
+	
+	for _, p := range projects {
+		u24h, u7d, u30d, tm, am, err := GetProjectUptimeStatsAggregate(db, p.ID)
+		if err != nil {
+			continue
+		}
+		totalMonitors += tm
+		activeMonitors += am
+		// GetProjectUptimeStatsAggregate returns the average uptime per project
+		// To compute global average weighted by monitors, we multiply by number of active monitors
+		// This ensures each monitor has equal weight in the final average
+		// Example: Project A (90% uptime, 2 monitors) + Project B (80% uptime, 3 monitors)
+		// = (90*2 + 80*3) / (2+3) = 84% global average
+		if am > 0 {
+			totalUptime24h += u24h * float64(am)
+			totalUptime7d += u7d * float64(am)
+			totalUptime30d += u30d * float64(am)
+		}
+	}
+	
+	if activeMonitors > 0 {
+		avgUptime24h = totalUptime24h / float64(activeMonitors)
+		avgUptime7d = totalUptime7d / float64(activeMonitors)
+		avgUptime30d = totalUptime30d / float64(activeMonitors)
+	}
+	
+	return avgUptime24h, avgUptime7d, avgUptime30d, totalMonitors, activeMonitors, nil
 }
 
 // Settings functions
