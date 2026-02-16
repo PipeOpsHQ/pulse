@@ -22,6 +22,60 @@ var notificationCache = &NotificationCache{
 	lastNotifications: make(map[string]time.Time),
 }
 
+// Insights response cache
+type InsightsCache struct {
+	mu      sync.RWMutex
+	data    map[string][]byte      // key: "projectID:timeRange" -> JSON response
+	expires map[string]time.Time   // key: "projectID:timeRange" -> expiration time
+}
+
+var insightsCache = &InsightsCache{
+	data:    make(map[string][]byte),
+	expires: make(map[string]time.Time),
+}
+
+// GetCachedInsights retrieves cached insights if not expired
+func (c *InsightsCache) Get(key string) ([]byte, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	
+	expires, exists := c.expires[key]
+	if !exists || time.Now().After(expires) {
+		return nil, false
+	}
+	
+	data, exists := c.data[key]
+	return data, exists
+}
+
+// SetCachedInsights stores insights with TTL
+func (c *InsightsCache) Set(key string, data []byte, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	c.data[key] = data
+	c.expires[key] = time.Now().Add(ttl)
+	
+	// Clean up expired entries periodically
+	if len(c.data)%50 == 0 {
+		go c.Clean()
+	}
+}
+
+// Clean removes expired entries from cache
+func (c *InsightsCache) Clean() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	now := time.Now()
+	for key, expires := range c.expires {
+		if now.After(expires) {
+			delete(c.data, key)
+			delete(c.expires, key)
+		}
+	}
+}
+
 // Batch inserter for errors
 type ErrorBatch struct {
 	Event   *ErrorEvent

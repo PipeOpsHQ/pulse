@@ -2247,6 +2247,15 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		timeRange = "7d"
 	}
 
+	// Check cache first
+	cacheKey := fmt.Sprintf("%s:%s", projectID, timeRange)
+	if cached, found := insightsCache.Get(cacheKey); found {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cache", "HIT")
+		w.Write(cached)
+		return
+	}
+
 	trends, _ := GetHourlyStats(db, projectID)
 
 	insights := map[string]interface{}{
@@ -2383,8 +2392,19 @@ func getInsights(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 	insights["coverage"] = coverageStats
 
+	// Encode response
+	responseData, err := json.Marshal(insights)
+	if err != nil {
+		http.Error(w, "Failed to encode insights", http.StatusInternalServerError)
+		return
+	}
+
+	// Cache the response for 30 seconds
+	insightsCache.Set(cacheKey, responseData, 30*time.Second)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(insights)
+	w.Header().Set("X-Cache", "MISS")
+	w.Write(responseData)
 }
 
 func getProjectSettings(w http.ResponseWriter, r *http.Request, db *sql.DB) {
