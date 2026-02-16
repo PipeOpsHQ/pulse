@@ -362,10 +362,12 @@ func InitDB() (*sql.DB, error) {
 	}
 
 	// Configure connection pool for better performance with SQLite
-	// SQLite only supports single writer, but multiple readers
-	db.SetMaxOpenConns(50)  // Increased for better read concurrency
-	db.SetMaxIdleConns(10)  // Keep more idle connections ready
-	db.SetConnMaxLifetime(15 * time.Minute)  // Longer lifetime for connections
+	// SQLite with WAL mode supports concurrent reads but single writer
+	// Setting higher MaxOpenConns (50) allows more concurrent read queries
+	// This is beneficial for read-heavy workloads like dashboards and insights
+	db.SetMaxOpenConns(50)  // Allows 50 concurrent connections (mostly readers)
+	db.SetMaxIdleConns(10)  // Keep 10 idle connections ready to reduce latency
+	db.SetConnMaxLifetime(15 * time.Minute)  // Longer lifetime for stable connections
 	db.SetConnMaxIdleTime(5 * time.Minute)   // Close idle connections after 5 minutes
 
 	// Seed admin user
@@ -1823,7 +1825,11 @@ func GetAllProjectsUptimeStatsAggregate(db *sql.DB) (avgUptime24h, avgUptime7d, 
 		}
 		totalMonitors += tm
 		activeMonitors += am
-		// Weighted by number of active monitors in this project
+		// GetProjectUptimeStatsAggregate returns the average uptime per project
+		// To compute global average weighted by monitors, we multiply by number of active monitors
+		// This ensures each monitor has equal weight in the final average
+		// Example: Project A (90% uptime, 2 monitors) + Project B (80% uptime, 3 monitors)
+		// = (90*2 + 80*3) / (2+3) = 84% global average
 		if am > 0 {
 			totalUptime24h += u24h * float64(am)
 			totalUptime7d += u7d * float64(am)

@@ -34,6 +34,16 @@ var insightsCache = &InsightsCache{
 	expires: make(map[string]time.Time),
 }
 
+// StartInsightsCacheCleaner starts a background goroutine that periodically cleans expired cache entries
+func StartInsightsCacheCleaner() {
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		for range ticker.C {
+			insightsCache.Clean()
+		}
+	}()
+}
+
 // GetCachedInsights retrieves cached insights if not expired
 func (c *InsightsCache) Get(key string) ([]byte, bool) {
 	c.mu.RLock()
@@ -55,11 +65,6 @@ func (c *InsightsCache) Set(key string, data []byte, ttl time.Duration) {
 	
 	c.data[key] = data
 	c.expires[key] = time.Now().Add(ttl)
-	
-	// Clean up expired entries periodically
-	if len(c.data)%50 == 0 {
-		go c.Clean()
-	}
 }
 
 // Clean removes expired entries from cache

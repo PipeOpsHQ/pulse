@@ -352,6 +352,7 @@ func main() {
 	// Start background workers
 	go StartMonitorWorker(db)
 	go StartErrorBatchInserter(db)
+	StartInsightsCacheCleaner() // Start cache cleaner with background ticker
 
 	log.Printf("Pulse OSS starting on port %s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
