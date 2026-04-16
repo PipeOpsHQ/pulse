@@ -13,9 +13,9 @@
     "autoprefixer": "^10.4.23",
     "lucide-svelte": "^0.562.0",
     "postcss": "^8.5.6",
-    "svelte": "^5.53.0",
+    "svelte": "^5.55.4",
     "tailwindcss": "^4.1.18",
-    "vite": "^7.3.1"
+    "vite": "^7.3.2"
   },
   "dependencies": {
     "@sentry/svelte": "^8.45.0",
